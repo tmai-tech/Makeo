@@ -74,6 +74,9 @@
     var u = user(s);
     return u && b && b.userId === u.id;
   }
+  function flowKeyOf(b) {
+    return ((b && (b.flowKey || b.geminiKey)) || "").trim();
+  }
   function advanceJobs(s) {
     var now = Date.now();
     s.jobs.forEach(function (j) {
@@ -108,8 +111,8 @@
   function missingForVideo(brand, mode, prompt) {
     var miss = [];
     if (!brand || !brand.name) miss.push("a brand name");
-    if (!(brand.geminiKey || "").trim()) {
-      miss.push("a Gemini API key (Brand → Google generation). Get one at aistudio.google.com/apikey. Google Flow cannot run inside this website — the key calls Veo 3.1.");
+    if (!flowKeyOf(brand)) {
+      miss.push("your Google Flow key (Brand → Google Flow key). Create one at aistudio.google.com/apikey and paste it — Generate will not run without it.");
     }
     if (mode === "custom") {
       if (!(prompt || "").trim()) miss.push("your own video prompt");
@@ -350,13 +353,14 @@
       ? brands.map(function (b) {
           return '<div class="card"><a href="#/brands/' + b.id + '"><strong>' + esc(b.name) +
             "</strong></a><div class=\"muted\">" + esc(b.slug) + "</div>" +
-            '<div class="row"><a href="#/brands/' + b.id + '/compose">Generate</a>' +
+            '<div class="row"><a href="#/brands/' + b.id + '/keys">Flow key</a>' +
+            ' · <a href="#/brands/' + b.id + '/compose">Generate</a>' +
             ' · <a href="#/brands/' + b.id + '/inbox">Inbox</a>' +
             ' · <a href="#/brands/' + b.id + '/instagram">Instagram</a></div></div>';
         }).join("")
       : '<p class="muted">No brands yet. Create one to start.</p>';
     return (
-      '<div class="banner">Real video needs a <strong>Gemini API key</strong> on the brand (Google generation). That key calls <strong>Veo 3.1</strong> — Google Flow’s web UI cannot run in this browser. Without a key, Generate will stop and list what is missing.</div>' +
+      '<div class="banner">Before Generate works, open the brand and enter your <strong>Google Flow key</strong>. Without that key, no video is created.</div>' +
       "<h1>Your brands</h1>" + cards +
       '<div class="actions"><a class="btn primary" href="#/brands/new">New brand</a></div>'
     );
@@ -366,7 +370,7 @@
     b = b || {};
     return (
       '<section class="panel"><h1>' + (b.id ? "Edit " + esc(b.name) : "New brand") + "</h1>" +
-      '<p class="muted">Name is required. For a real Google video you must paste a Gemini API key below.</p>' +
+      '<p class="muted">Name is required. You will be asked for your Google Flow key next — Generate will not run without it.</p>' +
       (err ? '<p class="error">' + esc(err) + "</p>" : "") +
       '<form id="brandForm">' +
       '<label>Name</label><input name="name" required value="' + esc(b.name || "") + '"/>' +
@@ -375,22 +379,33 @@
       '<label>Spoken hook</label><textarea name="hook" rows="2">' + esc(b.hook || "") + "</textarea>" +
       '<label>Tone</label><input name="tone" value="' + esc(b.tone || "") + '"/>' +
       '<label>Region</label><input name="region" value="' + esc(b.region || "") + '" placeholder="e.g. US, IN"/>' +
-      '<h2>Google generation</h2>' +
-      '<p class="muted">Google <strong>Flow</strong> (labs.google/fx) is a logged-in Chrome session — it cannot run on this website. Paste a <strong>Gemini API key</strong> so this page can call <strong>Veo 3.1</strong> (same family of models Flow uses). Get a key: <a href="https://aistudio.google.com/apikey" target="_blank" rel="noopener">aistudio.google.com/apikey</a>. The key stays in this browser only.</p>' +
-      '<label>Gemini API key (required to generate video)</label>' +
-      '<input name="geminiKey" type="password" autocomplete="off" placeholder="' +
-      (b.geminiKey ? "Saved — paste a new key to replace" : "AIza…") + '"/>' +
-      (b.geminiKey ? '<p class="ok">Key on file ending …' + esc(b.geminiKey.slice(-4)) + "</p>" : '<p class="error">No Gemini key saved yet. Generate will refuse until you add one.</p>') +
-      '<label>Flow project URL (optional — used by the desktop worker, not this page)</label>' +
-      '<input name="flowProjectUrl" value="' + esc(b.flowProjectUrl || "") + '" placeholder="https://labs.google/fx/tools/flow/project/…"/>' +
       '<label>Logo (optional)</label><input name="logo" type="file" accept="image/*"/>' +
       (b.logo ? '<p><img class="logo-preview" src="' + b.logo + '" alt="logo"/></p>' : "") +
       '<label>Splash / end-card (optional)</label><input name="splash" type="file" accept="image/*,.gif"/>' +
-      '<div class="row"><button class="btn primary" type="submit">Save brand</button></div></form>' +
+      '<div class="row"><button class="btn primary" type="submit">Save and enter Flow key</button></div></form>' +
       (b.id
-        ? '<p><a href="#/brands/' + b.id + '/compose">Generate</a> · <a href="#/brands/' + b.id + '/inbox">Inbox</a> · <a href="#/brands/' + b.id + '/instagram">Instagram</a></p>'
+        ? '<p><a href="#/brands/' + b.id + '/keys">Google Flow key</a> · <a href="#/brands/' + b.id + '/compose">Generate</a> · <a href="#/brands/' + b.id + '/inbox">Inbox</a></p>'
         : "") +
       "</section>"
+    );
+  }
+
+  function keysForm(b, err, ok) {
+    var has = flowKeyOf(b);
+    return (
+      '<section class="panel"><h1>Enter your Google Flow key</h1>' +
+      '<p>Makeo generates video with <strong>your</strong> Google Flow / Gemini key. We do not provide one. Create a key at <a href="https://aistudio.google.com/apikey" target="_blank" rel="noopener">aistudio.google.com/apikey</a>, then paste it here. It stays in this browser only.</p>' +
+      (has ? '<p class="ok">A key is saved (…' + esc(has.slice(-4)) + "). Paste a new one to replace it.</p>" : '<p class="error">No Google Flow key on this brand yet. Generate is blocked until you save one.</p>') +
+      (err ? '<p class="error">' + esc(err) + "</p>" : "") +
+      (ok ? '<p class="ok">' + esc(ok) + "</p>" : "") +
+      '<form id="keysForm">' +
+      '<label>Google Flow key</label>' +
+      '<input name="flowKey" type="password" autocomplete="off" placeholder="Paste your Google Flow key" ' + (has ? "" : "required") + "/>" +
+      '<label>Flow project URL (optional)</label>' +
+      '<input name="flowProjectUrl" value="' + esc(b.flowProjectUrl || "") + '" placeholder="https://labs.google/fx/tools/flow/project/…"/>' +
+      '<div class="row"><button class="btn primary" type="submit">Save Google Flow key</button>' +
+      (has ? '<a class="btn ghost" href="#/brands/' + b.id + '/compose">Generate video</a>' : "") +
+      "</div></form></section>"
     );
   }
 
@@ -414,9 +429,9 @@
     return (
       '<section class="panel"><h1>Generate for ' + esc(b.name) + "</h1>" +
       '<p class="muted">This calls <strong>Veo 3.1</strong> with the Gemini key saved on the brand. Google Flow’s website is not opened from here. Without a key or a prompt, nothing is generated and the missing items are listed.</p>' +
-      (b.geminiKey
-        ? '<p class="ok">Gemini key on file (…' + esc(b.geminiKey.slice(-4)) + ').</p>'
-        : '<p class="error">No Gemini key on this brand. <a href="#/brands/' + b.id + '">Add it under Google generation</a> first.</p>') +
+      (flowKeyOf(b)
+        ? '<p class="ok">Google Flow key on file (…' + esc(flowKeyOf(b).slice(-4)) + ').</p>'
+        : '<p class="error">No Google Flow key. <a href="#/brands/' + b.id + '/keys">Enter your Google Flow key</a> before generating.</p>') +
       (err ? '<p class="error">' + err + "</p>" : "") +
       '<form id="composeForm"><label>Mode</label><select name="mode" id="mode">' +
       '<option value="custom">My own prompt</option>' +
@@ -560,17 +575,39 @@
         rec.hook = form.hook.value.trim();
         rec.tone = form.tone.value.trim();
         rec.region = form.region.value.trim();
-        if (form.geminiKey.value.trim()) rec.geminiKey = form.geminiKey.value.trim();
-        rec.flowProjectUrl = form.flowProjectUrl.value.trim();
         if (files[0]) rec.logo = files[0];
         if (files[1]) rec.splash = files[1];
         if (!existing) s.brands.push(rec);
         save(s);
-        go("/brands/" + rec.id + "/instagram");
+        go("/brands/" + rec.id + "/keys");
       }).catch(function (err) {
         render(shell(s, brandForm(existing, err.message)));
         bindBrand(existing);
       });
+    });
+  }
+
+  function bindKeys(b) {
+    var form = document.getElementById("keysForm");
+    if (!form) return;
+    form.addEventListener("submit", function (e) {
+      e.preventDefault();
+      var key = form.flowKey.value.trim();
+      var s = state();
+      var rec = brandBy(s, b.id);
+      if (!key && !flowKeyOf(rec)) {
+        render(shell(s, keysForm(rec, "Paste your Google Flow key. Generate will not run without it.")));
+        bindKeys(rec);
+        return;
+      }
+      if (key) {
+        rec.flowKey = key;
+        rec.geminiKey = key;
+      }
+      rec.flowProjectUrl = form.flowProjectUrl.value.trim();
+      save(s);
+      render(shell(s, keysForm(rec, null, "Google Flow key saved. You can generate a video now.")));
+      bindKeys(rec);
     });
   }
 
@@ -612,7 +649,7 @@
       var line = sceneText(b, mode.value, custom);
       var caption = form.caption.value.trim() || (b.name + (b.hook ? " — " + b.hook : ""));
       status.textContent = "Starting Veo 3.1 with your Gemini key…";
-      generateVeo(b.geminiKey.trim(), line, function (msg) {
+      generateVeo(flowKeyOf(b), line, function (msg) {
         if (status) status.textContent = msg;
       }).then(function (url) {
         var s = state();
@@ -719,8 +756,18 @@
         render(shell(s, '<p class="error">Brand not found.</p>'));
         return;
       }
+      if (parts[2] === "keys") { render(shell(s, keysForm(b))); bindKeys(b); return; }
       if (parts[2] === "instagram") { render(shell(s, igForm(b))); bindIg(b); return; }
-      if (parts[2] === "compose") { render(shell(s, compose(b))); bindCompose(b); return; }
+      if (parts[2] === "compose") {
+        if (!flowKeyOf(b)) {
+          render(shell(s, keysForm(b, "Enter your Google Flow key before generating a video.")));
+          bindKeys(b);
+          return;
+        }
+        render(shell(s, compose(b)));
+        bindCompose(b);
+        return;
+      }
       if (parts[2] === "inbox") {
         render(shell(s, inbox(s, b)));
         bindInbox(b);
