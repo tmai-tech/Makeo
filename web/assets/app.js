@@ -241,8 +241,11 @@
       } else if (data.error) detail = typeof data.error === "string" ? data.error : (data.error.message || "");
       else if (data.message) detail = data.message;
     }
+    var locked = /exhausted|locked|top up/i.test(detail);
     if (status === 401) return detail || "fal.ai rejected this key (401). Copy a new key from fal.ai/dashboard/keys.";
-    if (status === 402 || status === 403) return detail || "fal.ai has no usable credit on this key. Check billing at fal.ai/dashboard.";
+    if (locked || status === 402 || status === 403) {
+      return "fal.ai has no usable dollars on this account. Creating a new account or a new key does not add credit. Open fal.ai/dashboard/billing, add at least $5, wait until the balance shows a number above $0, then generate again. If it still says locked after a top-up, email support@fal.ai (known fal unlock bug). Or switch Engine to Google Veo 3.1 — that uses your Flow key, not fal.";
+    }
     if (status === 429) return detail || "fal.ai rate-limited this key. Wait and try again.";
     return detail || ("fal.ai failed (HTTP " + status + ").");
   }
@@ -473,10 +476,9 @@
       '<p class="click">Click <strong>New brand</strong>. In <strong>Name</strong> type your shop or brand (example: Makers Nook). You can leave the other boxes empty. Click <strong>Save and enter keys</strong>.</p></div>' +
 
       '<div class="how-step"><h3><span class="n">3</span> Get a fal.ai key (this branch)</h3>' +
-      "<p>On this experiment branch you can make a video with fal.ai signup credit instead of Google.</p>" +
-      '<p class="click">Click <a href="https://fal.ai/dashboard/keys" target="_blank" rel="noopener"><strong>Open fal.ai keys</strong></a>. Sign in. Click <strong>Create Key</strong>. Copy it.</p>' +
-      '<p class="click">In Makeo: Home → your brand → <strong>Keys</strong>. Paste into <strong>fal.ai API key</strong>. Click <strong>Save keys</strong>.</p>' +
-      "<p>Then skip to step 5 and generate. Use the LTX Fast model first so one free credit is enough.</p></div>" +
+      "<p>fal’s API is prepaid. A new fal login starts at $0. Their free website clips are not usable from this key.</p>" +
+      '<p class="click">Open <a href="https://fal.ai/dashboard/billing" target="_blank" rel="noopener"><strong>fal billing</strong></a>, add at least $5, then copy a key from <a href="https://fal.ai/dashboard/keys" target="_blank" rel="noopener">fal keys</a> and paste it on Makeo → Keys.</p>' +
+      "<p>Or skip fal and use your Google Flow key in step 3b.</p></div>" +
 
       '<div class="how-step"><h3><span class="n">3b</span> Get a Google Flow key (optional)</h3>' +
       "<p>Google makes the video. You must bring your own key. Use a <strong>personal Gmail</strong> (not a work/school email if you can). Keep the Makeo tab open.</p>" +
@@ -599,10 +601,10 @@
       '<section class="panel"><h1>Video keys</h1>' +
       '<p>This branch can generate with <strong>fal.ai</strong> (new) or the existing Google Flow / Veo key. Makeo does not give you a key.</p>' +
 
-      '<div class="how-step"><h3><span class="n">1</span> fal.ai key (try this first on this branch)</h3>' +
-      '<p class="click">1. Open <a href="https://fal.ai/dashboard/keys" target="_blank" rel="noopener"><strong>fal.ai/dashboard/keys</strong></a> and sign in with Google or GitHub.</p>' +
-      "<p>New accounts usually get a small signup credit. That is enough for one short LTX clip.</p>" +
-      '<p class="click">2. Click <strong>Create Key</strong> → copy it → paste below → Save keys.</p>' +
+      '<div class="how-step"><h3><span class="n">1</span> fal.ai key (paid API — a new account is $0)</h3>' +
+      '<p class="error">A fresh fal account and a new key do <strong>not</strong> include API credit. The website sandbox (free FLUX clips) is not the same as the API key. Until Billing shows a balance above $0, Generate with fal will say “Exhausted balance / User is locked”.</p>' +
+      '<p class="click">1. Open <a href="https://fal.ai/dashboard/billing" target="_blank" rel="noopener"><strong>fal.ai/dashboard/billing</strong></a>. Add a card and top up at least <strong>$5</strong>. Wait until the page shows a positive balance.</p>' +
+      '<p class="click">2. Then open <a href="https://fal.ai/dashboard/keys" target="_blank" rel="noopener"><strong>fal.ai/dashboard/keys</strong></a> → Create / Add key → paste it below → Save keys.</p>' +
       (hasFal
         ? '<p class="ok">fal.ai key on file (…' + esc(hasFal.slice(-4)) + ").</p>"
         : '<p class="muted">No fal.ai key yet.</p>') +
@@ -651,8 +653,8 @@
     var hasFal = falKeyOf(b);
     var hasFlow = flowKeyOf(b);
     var engineOpts = "";
-    if (hasFal) engineOpts += '<option value="fal">fal.ai</option>';
-    if (hasFlow) engineOpts += '<option value="veo">Google Veo 3.1</option>';
+    if (hasFlow) engineOpts += '<option value="veo">Google Veo 3.1 (uses your Flow key)</option>';
+    if (hasFal) engineOpts += '<option value="fal">fal.ai (needs a paid fal balance)</option>';
     var modelOpts = Object.keys(falModels()).map(function (k) {
       return '<option value="' + k + '">' + esc(falModels()[k].label) + "</option>";
     }).join("");
@@ -661,7 +663,10 @@
       '<p class="muted">This branch can call <strong>fal.ai</strong> or Google Veo. Without a key or a prompt, nothing is generated and the missing items are listed.</p>' +
       (hasFal
         ? '<p class="ok">fal.ai key on file (…' + esc(hasFal.slice(-4)) + ").</p>"
-        : '<p class="muted">No fal.ai key. <a href="#/brands/' + b.id + '/keys">Add one</a> to try the free-credit path.</p>') +
+        : '<p class="muted">No fal.ai key. <a href="#/brands/' + b.id + '/keys">Add one</a> after you have a paid fal balance.</p>') +
+      (hasFal
+        ? '<p class="muted">fal API is prepaid. If Generate says exhausted/locked, top up at <a href="https://fal.ai/dashboard/billing" target="_blank" rel="noopener">fal billing</a> or pick Google Veo below.</p>'
+        : "") +
       (hasFlow
         ? '<p class="ok">Google Flow key on file (…' + esc(flowKeyOf(b).slice(-4)) + ").</p>"
         : "") +
