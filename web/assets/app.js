@@ -302,10 +302,10 @@
     opts = opts || {};
     var u = user(s);
     var nav = opts.landing
-      ? '<a href="#/how">How it works</a><a href="#/signup">Create account</a><a href="#/login">Sign in</a>'
+      ? '<a href="#/help">Easy tutorial</a><a href="#/signup">Create account</a><a href="#/login">Sign in</a>'
       : (u
-        ? '<a href="#/home">Home</a><span class="who">' + esc(u.email) + "</span><a href=\"#/logout\">Log out</a>"
-        : '<a href="#/login">Sign in</a><a href="#/signup">Create account</a>');
+        ? '<a href="#/home">Home</a><a href="#/help">Tutorial</a><span class="who">' + esc(u.email) + "</span><a href=\"#/logout\">Log out</a>"
+        : '<a href="#/help">Tutorial</a><a href="#/login">Sign in</a><a href="#/signup">Create account</a>');
     return (
       '<header class="top"><a class="brand" href="#/"><img src="assets/icon.svg" width="28" height="28" alt=""/><span>Makeo</span></a><nav>' +
       nav + "</nav></header><main>" + inner + "</main>" +
@@ -318,13 +318,64 @@
       '<section class="hero">' +
       '<p class="eyebrow">Create account · Add brand · Generate a preview · Approve</p>' +
       "<h1>Your brand. Your prompt.<br/>An 8-second Reel.</h1>" +
-      '<p class="lead">Sign up, set up a brand, write a prompt (or a pitch for a topic), then watch an 8-second preview. Approve only after the clip exists. Nothing posts without a click.</p>' +
-      '<div class="actions"><a class="btn primary" href="#/signup">Create an account</a>' +
-      '<a class="btn ghost" href="#/login">I already have one</a></div></section>' +
+      '<p class="lead">Follow the easy tutorial. We show every click — including which Google page gives you a key.</p>' +
+      '<div class="actions"><a class="btn primary" href="#/help">Start the easy tutorial</a>' +
+      '<a class="btn ghost" href="#/signup">I already know — create account</a></div></section>' +
       '<ol class="pipe" id="how"><li><strong>1. Account</strong><span>Email + password, this browser only</span></li>' +
       "<li><strong>2. Brand</strong><span>Name, pitch, hook, optional logo</span></li>" +
       "<li><strong>3. Generate</strong><span>Needs your prompt, or a pitch/hook for a topic</span></li>" +
       "<li><strong>4. Approve</strong><span>Only after a preview video is ready</span></li></ol>"
+    );
+  }
+
+  function tutorial() {
+    return (
+      '<p class="eyebrow">Easy tutorial</p>' +
+      "<h1>Do these steps in order</h1>" +
+      '<p class="lead">You do not need to be technical. Read the yellow “Click” lines and do only that.</p>' +
+      '<div class="how">' +
+
+      '<div class="how-step"><h3><span class="n">1</span> Create your Makeo login</h3>' +
+      "<p>This login is only for Makeo in <em>this</em> browser. Invent a password. Do not use your bank password.</p>" +
+      '<p class="click">Click <strong>Create my account now</strong> below. Type your email. Type a password (6 or more letters). Click <strong>Create account</strong>.</p>' +
+      '<a class="btn primary" href="#/signup">Create my account now</a></div>' +
+
+      '<div class="how-step"><h3><span class="n">2</span> Add your brand name</h3>' +
+      "<p>After you are in, you will see “Your brands”.</p>" +
+      '<p class="click">Click <strong>New brand</strong>. In <strong>Name</strong> type your shop or brand (example: Makers Nook). You can leave the other boxes empty. Click <strong>Save and enter Flow key</strong>.</p></div>' +
+
+      '<div class="how-step"><h3><span class="n">3</span> Get a Google Flow key (new tab)</h3>' +
+      "<p>Google makes the video. You must bring your own key. It is free to create. You need a normal Google / Gmail sign-in.</p>" +
+      '<p class="click">Click this yellow button. A new tab opens. Keep this Makeo tab open.</p>' +
+      '<p><a class="btn primary" href="https://aistudio.google.com/apikey" target="_blank" rel="noopener">Open Google to get my key</a></p>' +
+      "<p>On the Google page, do this:</p>" +
+      "<ol>" +
+      "<li>If Google asks you to sign in, sign in with Gmail.</li>" +
+      "<li>If you see terms, click <strong>Agree</strong> or <strong>Continue</strong>.</li>" +
+      "<li>Click the blue button <strong>Create API key</strong>.</li>" +
+      "<li>If it asks for a project, click <strong>Create API key in new project</strong> (or pick any project and click <strong>Create</strong>).</li>" +
+      "<li>A long secret appears (it often starts with <strong>AIza</strong>). Click <strong>Copy</strong>.</li>" +
+      "</ol>" +
+      "<p>Come back to the Makeo tab. Do not share this key with anyone.</p></div>" +
+
+      '<div class="how-step"><h3><span class="n">4</span> Paste the key into Makeo</h3>' +
+      "<p>You should be on the page <strong>Enter your Google Flow key</strong>. If not:</p>" +
+      '<p class="click">Click <strong>Home</strong> → your brand name → <strong>Flow key</strong>.</p>' +
+      '<p class="click">Click inside the box <strong>Google Flow key</strong>. Paste (<strong>Ctrl+V</strong> on Windows, <strong>Cmd+V</strong> on Mac). Click <strong>Save Google Flow key</strong>.</p>' +
+      "<p>You should see a green line: key saved.</p></div>" +
+
+      '<div class="how-step"><h3><span class="n">5</span> Make a video</h3>' +
+      '<p class="click">Click <strong>Generate video</strong>. In <strong>Video prompt</strong> type what you want to see, in plain words. Example: <em>A smiling person in a small shop holding a handmade bag, warm light, 8 seconds, phone video.</em></p>' +
+      '<p class="click">Click the yellow <strong>Generate video</strong> button. Wait 1–2 minutes. Do not close the tab.</p>' +
+      "<p>If something is missing, the page will list it in red. Fix that, then click Generate again.</p></div>" +
+
+      '<div class="how-step"><h3><span class="n">6</span> Watch, then Approve or Reject</h3>' +
+      "<p>When the video is ready you will see a player.</p>" +
+      '<p class="click">Press play. If you like it, click <strong>Approve &amp; post</strong>. If not, click <strong>Reject</strong>.</p>' +
+      "<p>Approve on this website does <strong>not</strong> put the video on Instagram. It only finishes the practice flow. Posting to Instagram needs the Makeo program on a computer.</p></div>" +
+
+      "</div>" +
+      '<div class="actions"><a class="btn primary" href="#/signup">Start at step 1 — create account</a></div>'
     );
   }
 
@@ -360,9 +411,9 @@
         }).join("")
       : '<p class="muted">No brands yet. Create one to start.</p>';
     return (
-      '<div class="banner">Before Generate works, open the brand and enter your <strong>Google Flow key</strong>. Without that key, no video is created.</div>' +
+      '<div class="banner">Stuck? Open the <a href="#/help">easy tutorial</a>. You must add a <strong>Google Flow key</strong> before a video can be made.</div>' +
       "<h1>Your brands</h1>" + cards +
-      '<div class="actions"><a class="btn primary" href="#/brands/new">New brand</a></div>'
+      '<div class="actions"><a class="btn primary" href="#/brands/new">New brand</a> <a class="btn ghost" href="#/help">Show me every click</a></div>'
     );
   }
 
@@ -394,7 +445,18 @@
     var has = flowKeyOf(b);
     return (
       '<section class="panel"><h1>Enter your Google Flow key</h1>' +
-      '<p>Makeo generates video with <strong>your</strong> Google Flow / Gemini key. We do not provide one. Create a key at <a href="https://aistudio.google.com/apikey" target="_blank" rel="noopener">aistudio.google.com/apikey</a>, then paste it here. It stays in this browser only.</p>' +
+      '<p>We need <strong>your</strong> key. Makeo does not give you one. Follow these clicks:</p>' +
+      '<div class="how-step"><h3><span class="n">A</span> Get the key from Google</h3>' +
+      '<p class="click">Click <strong>Open Google to get my key</strong>. A new tab opens.</p>' +
+      '<p><a class="btn primary" href="https://aistudio.google.com/apikey" target="_blank" rel="noopener">Open Google to get my key</a></p>' +
+      "<ol>" +
+      "<li>Sign in with Gmail if Google asks.</li>" +
+      "<li>Click <strong>Create API key</strong>.</li>" +
+      "<li>Click <strong>Create API key in new project</strong> (or choose a project → <strong>Create</strong>).</li>" +
+      "<li>Click <strong>Copy</strong> next to the long secret (often starts with AIza).</li>" +
+      "</ol></div>" +
+      '<div class="how-step"><h3><span class="n">B</span> Paste it here</h3>' +
+      '<p class="click">Click the box below. Paste. Click <strong>Save Google Flow key</strong>.</p></div>' +
       (has ? '<p class="ok">A key is saved (…' + esc(has.slice(-4)) + "). Paste a new one to replace it.</p>" : '<p class="error">No Google Flow key on this brand yet. Generate is blocked until you save one.</p>') +
       (err ? '<p class="error">' + esc(err) + "</p>" : "") +
       (ok ? '<p class="ok">' + esc(ok) + "</p>" : "") +
@@ -731,6 +793,10 @@
     if (path === "/logout") { s.session = null; save(s); go("/"); return; }
     if (path === "/" || path === "/how") {
       render(shell(s, landing(), { landing: true }));
+      return;
+    }
+    if (path === "/help") {
+      render(shell(s, tutorial(), { landing: !user(s) }));
       return;
     }
     if (path === "/signup") {

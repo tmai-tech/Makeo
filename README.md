@@ -12,6 +12,8 @@ This repo is the product. The architecture and PR plan live in
 
 **Public site (GitHub Pages):** **https://tmai-tech.github.io/Makeo/**
 
+**Easy tutorial (every click):** **https://tmai-tech.github.io/Makeo/#/help**
+
 Walk the live demo there: **Create account → New brand → Instagram → Generate → Inbox (approve or reject)**. Accounts stay in that browser. Real Veo + Instagram still need the clone-and-run worker.
 
 Same hosting path as the other tmai-tech static apps: `web/` deploys on every
