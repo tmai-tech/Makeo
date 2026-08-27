@@ -10,6 +10,12 @@ Nothing posts without a click. Rejecting publishes nothing.
 This repo is the product. The architecture and PR plan live in
 [`DESIGN.md`](DESIGN.md).
 
+**Public site (GitHub Pages):** **https://tmai-tech.github.io/Makeo/**
+
+Same hosting path as the other tmai-tech static apps: `web/` deploys on every
+push to `main` via `.github/workflows/deploy-pages.yml`. The FastAPI worker
+still runs on your clone-and-run host.
+
 **v1 is waitlisted.** Each brand brings its own Gemini key and Google Flow
 login. Approval is in-app (Discord comes later). The worker is this git
 checkout plus Chrome — clone and run. Not GitHub Actions. Not Task Scheduler

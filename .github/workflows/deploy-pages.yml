@@ -1,0 +1,52 @@
+name: Deploy UI to GitHub Pages
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "web/**"
+      - ".github/workflows/deploy-pages.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Sanity-check static site
+        run: |
+          set -euo pipefail
+          for f in web/index.html web/manifest.webmanifest web/assets/app.js web/assets/styles.css; do
+            test -f "$f" || { echo "::error::Missing $f"; exit 1; }
+          done
+          ls -la web web/assets
+
+      - uses: actions/configure-pages@v5
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: web
+
+      - id: deployment
+        uses: actions/deploy-pages@v4
+
+      - name: Print share URL
+        run: |
+          echo "### Makeo web URL" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "**https://tmai-tech.github.io/Makeo/**" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "Deployed page_url: ${{ steps.deployment.outputs.page_url }}" >> "$GITHUB_STEP_SUMMARY"

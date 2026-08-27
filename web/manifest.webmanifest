@@ -1,0 +1,17 @@
+{
+  "name": "Makeo",
+  "short_name": "Makeo",
+  "start_url": "./",
+  "display": "standalone",
+  "background_color": "#111111",
+  "theme_color": "#111111",
+  "description": "Generate, brand, approve, and post short Reels for any brand.",
+  "icons": [
+    {
+      "src": "assets/icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any"
+    }
+  ]
+}
