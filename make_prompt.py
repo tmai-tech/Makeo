@@ -9,12 +9,15 @@ ponytail: stdlib urllib + ElementTree, no feedparser/requests. Two RSS feeds and
 one flat <item><title> read is not worth a dependency.
 """
 
+import argparse
 import json
 import os
 import sys
 import urllib.request
 import xml.etree.ElementTree as ET
 from pathlib import Path
+
+import brand_config as bc
 
 HERE = Path(__file__).parent
 FEEDS = [
@@ -56,33 +59,37 @@ Return ONLY valid JSON:
 {{"topic":"...","why_genz":"...","buzzit_link":"how it ties to Buzzit","veo_prompt":"...","caption":"..."}}"""
 
 
-def recent_topics(days=10):
+def recent_topics(history_dir=None, limit=10):
     """Topics already used, newest first, from the per-video sidecars.
 
     ponytail: the sidecars in out/ ARE the history -- no separate ledger to keep
     in sync. Without this every run picks the same dominant story: six runs in a
     row produced the same Kangana 'Gen Z lazy reel-makers' angle reworded.
+
+    history_dir may be repo out/ (flow-*.json) or a tenant jobs/ tree
+    (*/flow-*.json). Skip *-branded. limit is a count, not calendar days.
     """
+    root = Path(history_dir) if history_dir else (HERE / "out")
+    files = list(root.glob("flow-*.json")) + list(root.glob("*/flow-*.json"))
+    files = [f for f in files if not f.stem.endswith("-branded")]
+    files.sort(key=lambda p: p.stat().st_mtime, reverse=True)
     out = []
-    for f in sorted((HERE / "out").glob("flow-*.json"),
-                    key=lambda p: p.stat().st_mtime, reverse=True):
-        if f.stem.endswith("-branded"):
-            continue
+    for f in files:
         try:
             t = json.loads(f.read_text(encoding="utf-8")).get("topic", "").strip()
         except (json.JSONDecodeError, OSError):
             continue
         if t and t not in out:
             out.append(t)
-        if len(out) >= days:
+        if len(out) >= limit:
             break
     return out
 
 
-def headlines(limit=25):
+def headlines(limit=25, feeds=None):
     """Titles from both feeds, capped so the prompt stays cheap."""
     out = []
-    for url in FEEDS:
+    for url in (feeds if feeds is not None else FEEDS):
         try:
             with urllib.request.urlopen(
                 urllib.request.Request(url, headers=UA), timeout=20
@@ -98,10 +105,11 @@ def headlines(limit=25):
     return list(dict.fromkeys(out))[:limit]
 
 
-def gemini(prompt, key):
+def gemini(prompt, key, model=None):
+    model = model or MODEL
     body = json.dumps({"contents": [{"parts": [{"text": prompt}]}]}).encode()
     req = urllib.request.Request(
-        f"https://generativelanguage.googleapis.com/v1beta/models/{MODEL}:generateContent",
+        f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent",
         data=body,
         headers={"Content-Type": "application/json", "x-goog-api-key": key},
     )
@@ -123,38 +131,71 @@ def parse(raw):
     missing = [k for k in ("topic", "veo_prompt", "caption") if not d.get(k)]
     if missing:
         sys.exit(f"missing field(s): {', '.join(missing)}")
+    if not d.get("buzzit_link") and d.get("brand_link"):
+        d["buzzit_link"] = d["brand_link"]
+    if not d.get("brand_link") and d.get("buzzit_link"):
+        d["brand_link"] = d["buzzit_link"]
     return d
 
 
-def main():
+def _parse_args(argv=None):
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--config", type=Path, help="BrandConfig JSON")
+    ap.add_argument("--out-dir", type=Path, help="write prompt.txt and today.json here")
+    ap.add_argument("--history-dir", type=Path,
+                    help="sidecars for topic dedupe; default = --out-dir or out/")
+    ap.add_argument("--demo", action="store_true")
+    return ap.parse_args(argv)
+
+
+def main(argv=None):
     # ponytail: Gen Z captions are emoji-heavy and the Windows console is cp1252.
     # Files are always UTF-8; only stdout needs the nudge.
     sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+    args = _parse_args(argv)
+    if args.demo:
+        demo()
+        return
+
+    cfg = bc.load(args.config) if args.config else None
+    out_dir = args.out_dir or HERE
+    history_dir = args.history_dir or args.out_dir or (HERE / "out")
+    feeds = cfg.feeds if cfg else FEEDS
+    model = cfg.model if cfg else MODEL
+    limit = cfg.headline_limit if cfg else 25
+    dedup = cfg.dedup_max_topics if cfg else 10
+
     key = os.environ.get("GEMINI_API_KEY")
     if not key:
         sys.exit("set GEMINI_API_KEY")
 
     print("fetching feeds...", flush=True)
-    titles = headlines()
+    titles = headlines(limit=limit, feeds=feeds)
     if not titles:
         sys.exit("no headlines fetched -- both feeds failed")
-    print(f"{len(titles)} headlines total, asking {MODEL}...", flush=True)
+    print(f"{len(titles)} headlines total, asking {model}...", flush=True)
 
-    used = recent_topics()
+    used = recent_topics(history_dir, limit=dedup)
     if used:
         print(f"avoiding {len(used)} recent topic(s)", flush=True)
     recent = ("Already covered (do NOT repeat these):\n"
               + "\n".join(f"- {t}" for t in used) + "\n") if used else ""
 
-    d = parse(gemini(INSTRUCTIONS.format(
-        brand=BRAND, headlines="\n".join(titles), recent=recent), key))
+    if cfg:
+        prompt = cfg.format_instructions("\n".join(titles), recent)
+    else:
+        prompt = INSTRUCTIONS.format(
+            brand=BRAND, headlines="\n".join(titles), recent=recent)
 
-    (HERE / "prompt.txt").write_text(d["veo_prompt"], encoding="utf-8")
-    (HERE / "today.json").write_text(json.dumps(d, indent=2), encoding="utf-8")
+    d = parse(gemini(prompt, key, model))
+
+    out_dir.mkdir(parents=True, exist_ok=True)
+    (out_dir / "prompt.txt").write_text(d["veo_prompt"], encoding="utf-8")
+    (out_dir / "today.json").write_text(json.dumps(d, indent=2), encoding="utf-8")
 
     print(f"\ntopic:   {d['topic']}")
     print(f"why:     {d.get('why_genz', '')}")
-    print(f"buzzit:  {d.get('buzzit_link', '')}")
+    print(f"buzzit:  {d.get('buzzit_link', d.get('brand_link', ''))}")
     print(f"caption: {d['caption']}")
     print(f"\nprompt.txt written ({len(d['veo_prompt'])} chars)")
     print("NOTE: this overwrote any previous prompt.txt/today.json. Generate the "
@@ -178,4 +219,4 @@ def demo():
 
 
 if __name__ == "__main__":
-    demo() if "--demo" in sys.argv else main()
+    main()
