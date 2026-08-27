@@ -1,10 +1,6 @@
 (function () {
-  var KEY = "makeo-demo-v1";
-  var TRENDS = [
-    { topic: "Side hustle payday", why: "Gen Z wants cash from the same reels they already post", caption: "Same reels. Real payout. {name} 💸" },
-    { topic: "Creator coins going live", why: "Gifts-to-bank is the hook", caption: "Gifts hit UPI. Only on {name} ✨" },
-    { topic: "Weekend drop culture", why: "Short vertical, FOMO, brand native", caption: "Drop it. Earn it. {name} 🔥" }
-  ];
+  var KEY = "makeo-demo-v2";
+  var clips = {};
 
   function load() {
     try { return JSON.parse(localStorage.getItem(KEY) || "{}"); }
@@ -22,7 +18,9 @@
   function uid() { return Math.random().toString(36).slice(2, 10) + Date.now().toString(36); }
   function hash(str) {
     return crypto.subtle.digest("SHA-256", new TextEncoder().encode(str)).then(function (buf) {
-      return Array.from(new Uint8Array(buf)).map(function (b) { return b.toString(16).padStart(2, "0"); }).join("");
+      return Array.from(new Uint8Array(buf)).map(function (b) {
+        return b.toString(16).padStart(2, "0");
+      }).join("");
     });
   }
   function route() {
@@ -53,10 +51,6 @@
   function advanceJobs(s) {
     var now = Date.now();
     s.jobs.forEach(function (j) {
-      if (j.status === "queued" || j.status === "running") {
-        if (now >= (j.readyAt || 0)) j.status = "awaiting_approval";
-        else j.status = "running";
-      }
       if (j.status === "publishing" && now >= (j.postedAt || 0)) j.status = "posted";
     });
   }
@@ -76,6 +70,137 @@
       r.readAsDataURL(file);
     });
   }
+  function loadImg(src) {
+    return new Promise(function (resolve) {
+      if (!src) return resolve(null);
+      var img = new Image();
+      img.onload = function () { resolve(img); };
+      img.onerror = function () { resolve(null); };
+      img.src = src;
+    });
+  }
+  function missingForVideo(brand, mode, prompt) {
+    var miss = [];
+    if (!brand || !brand.name) miss.push("a brand name");
+    if (mode === "custom") {
+      if (!(prompt || "").trim()) miss.push("your own video prompt");
+    } else {
+      if (!(brand.pitch || "").trim() && !(brand.hook || "").trim()) {
+        miss.push("a brand pitch or spoken hook (needed when you use “today’s topic”)");
+      }
+    }
+    if (typeof MediaRecorder === "undefined" || !HTMLCanvasElement.prototype.captureStream) {
+      miss.push("a browser that can record canvas video (Chrome or Edge)");
+    }
+    return miss;
+  }
+  function sceneText(brand, mode, prompt) {
+    if (mode === "custom") return prompt.trim();
+    var bits = [brand.name];
+    if (brand.pitch) bits.push(brand.pitch);
+    if (brand.hook) bits.push(brand.hook);
+    return bits.join(" — ");
+  }
+  function mimeType() {
+    var opts = ["video/webm;codecs=vp9", "video/webm;codecs=vp8", "video/webm"];
+    for (var i = 0; i < opts.length; i++) {
+      if (MediaRecorder.isTypeSupported(opts[i])) return opts[i];
+    }
+    return "";
+  }
+  function renderClip(brand, line, onTick) {
+    var mime = mimeType();
+    if (!mime) {
+      return Promise.reject(new Error("This browser cannot record a video preview."));
+    }
+    return Promise.all([loadImg(brand.logo), loadImg(brand.splash)]).then(function (imgs) {
+      return new Promise(function (resolve, reject) {
+        var w = 360, h = 640, secs = 8;
+        var canvas = document.createElement("canvas");
+        canvas.width = w;
+        canvas.height = h;
+        var ctx = canvas.getContext("2d");
+        var stream = canvas.captureStream(30);
+        var rec;
+        try { rec = new MediaRecorder(stream, { mimeType: mime, videoBitsPerSecond: 1200000 }); }
+        catch (e) { reject(e); return; }
+        var chunks = [];
+        rec.ondataavailable = function (e) { if (e.data && e.data.size) chunks.push(e.data); };
+        rec.onerror = function () { reject(new Error("Video recording failed.")); };
+        rec.onstop = function () {
+          if (!chunks.length) {
+            reject(new Error("Video recording produced no frames."));
+            return;
+          }
+          resolve(URL.createObjectURL(new Blob(chunks, { type: mime })));
+        };
+        var t0 = performance.now();
+        function draw(t) {
+          var p = Math.min(1, t / secs);
+          ctx.fillStyle = "#0d0d0d";
+          ctx.fillRect(0, 0, w, h);
+          if (imgs[1] && t > 5.2) {
+            ctx.drawImage(imgs[1], 0, 0, w, h);
+            ctx.fillStyle = "rgba(0,0,0,0.35)";
+            ctx.fillRect(0, 0, w, h);
+          } else {
+            var g = ctx.createLinearGradient(0, 0, w, h);
+            g.addColorStop(0, "#1a1408");
+            g.addColorStop(1, "#111");
+            ctx.fillStyle = g;
+            ctx.fillRect(0, 0, w, h);
+            ctx.fillStyle = "#e8b84b";
+            ctx.globalAlpha = 0.15 + 0.1 * Math.sin(t * 2);
+            ctx.fillRect(0, h * (0.2 + 0.05 * Math.sin(t)), w, 8);
+            ctx.globalAlpha = 1;
+          }
+          if (imgs[0]) {
+            var s = 72;
+            ctx.drawImage(imgs[0], (w - s) / 2, 48, s, s);
+          }
+          ctx.fillStyle = "#e8b84b";
+          ctx.font = "700 22px system-ui,sans-serif";
+          ctx.textAlign = "center";
+          ctx.fillText(brand.name || "", w / 2, imgs[0] ? 148 : 80);
+          ctx.fillStyle = "#eee";
+          ctx.font = "400 16px system-ui,sans-serif";
+          wrap(ctx, line, w / 2, 200, w - 48, 22);
+          if (brand.hook && t > 4) {
+            ctx.fillStyle = "#e8b84b";
+            ctx.font = "600 15px system-ui,sans-serif";
+            wrap(ctx, brand.hook, w / 2, h - 90, w - 48, 20);
+          }
+          ctx.fillStyle = "#9a9a9a";
+          ctx.font = "12px system-ui,sans-serif";
+          ctx.fillText((Math.min(secs, t)).toFixed(1) + "s / 8s", w / 2, h - 24);
+          if (onTick) onTick(p);
+        }
+        function wrap(c, text, x, y, max, lh) {
+          var words = String(text || "").split(/\s+/);
+          var row = "";
+          var yy = y;
+          for (var i = 0; i < words.length; i++) {
+            var test = row ? row + " " + words[i] : words[i];
+            if (c.measureText(test).width > max && row) {
+              c.fillText(row, x, yy);
+              row = words[i];
+              yy += lh;
+              if (yy > h - 120) break;
+            } else row = test;
+          }
+          if (row) c.fillText(row, x, yy);
+        }
+        rec.start(200);
+        function tick() {
+          var t = (performance.now() - t0) / 1000;
+          draw(t);
+          if (t >= secs) rec.stop();
+          else requestAnimationFrame(tick);
+        }
+        requestAnimationFrame(tick);
+      });
+    });
+  }
 
   function shell(s, inner, opts) {
     opts = opts || {};
@@ -83,27 +208,27 @@
     var nav = opts.landing
       ? '<a href="#/how">How it works</a><a href="#/signup">Create account</a><a href="#/login">Sign in</a>'
       : (u
-        ? '<a href="#/home">Home</a><span class="who">' + esc(u.email) + '</span><a href="#/logout">Log out</a>'
+        ? '<a href="#/home">Home</a><span class="who">' + esc(u.email) + "</span><a href=\"#/logout\">Log out</a>"
         : '<a href="#/login">Sign in</a><a href="#/signup">Create account</a>');
     return (
       '<header class="top"><a class="brand" href="#/"><img src="assets/icon.svg" width="28" height="28" alt=""/><span>Makeo</span></a><nav>' +
       nav + "</nav></header><main>" + inner + "</main>" +
-      '<footer><p>Live at <a href="https://tmai-tech.github.io/Makeo/">tmai-tech.github.io/Makeo</a></p></footer>'
+      "<footer><p>Live at <a href=\"https://tmai-tech.github.io/Makeo/\">tmai-tech.github.io/Makeo</a></p></footer>"
     );
   }
 
   function landing() {
     return (
       '<section class="hero">' +
-      '<p class="eyebrow">Create account · Add brand · Approve before anything posts</p>' +
+      '<p class="eyebrow">Create account · Add brand · Generate a preview · Approve</p>' +
       "<h1>Your brand. Your prompt.<br/>An 8-second Reel.</h1>" +
-      '<p class="lead">Walk the full Makeo flow in this demo: sign up, set up a brand, generate, then approve. Nothing posts without a click.</p>' +
+      '<p class="lead">Sign up, set up a brand, write a prompt (or a pitch for a topic), then watch an 8-second preview. Approve only after the clip exists. Nothing posts without a click.</p>' +
       '<div class="actions"><a class="btn primary" href="#/signup">Create an account</a>' +
       '<a class="btn ghost" href="#/login">I already have one</a></div></section>' +
-      '<ol class="pipe" id="how"><li><strong>1. Account</strong><span>Email + password, stored only in this browser</span></li>' +
-      "<li><strong>2. Brand</strong><span>Pitch, hook, assets, Instagram</span></li>" +
-      "<li><strong>3. Compose</strong><span>Your prompt or today’s trend</span></li>" +
-      "<li><strong>4. Approve</strong><span>Watch the preview. Post or reject</span></li></ol>"
+      '<ol class="pipe" id="how"><li><strong>1. Account</strong><span>Email + password, this browser only</span></li>' +
+      "<li><strong>2. Brand</strong><span>Name, pitch, hook, optional logo</span></li>" +
+      "<li><strong>3. Generate</strong><span>Needs your prompt, or a pitch/hook for a topic</span></li>" +
+      "<li><strong>4. Approve</strong><span>Only after a preview video is ready</span></li></ol>"
     );
   }
 
@@ -115,7 +240,7 @@
       : 'New here? <a href="#/signup">Create an account</a>';
     return (
       '<section class="panel"><h1>' + title + "</h1>" +
-      '<p class="muted">This public demo keeps the account in your browser. A host worker is still required for real Veo + Instagram.</p>' +
+      '<p class="muted">Account stays in this browser. Google Flow / a real Instagram publish need the Makeo worker on your machine.</p>' +
       (err ? '<p class="error">' + esc(err) + "</p>" : "") +
       '<form id="authForm">' +
       '<label>Email</label><input name="email" type="email" required autocomplete="username"/>' +
@@ -136,9 +261,9 @@
             ' · <a href="#/brands/' + b.id + '/inbox">Inbox</a>' +
             ' · <a href="#/brands/' + b.id + '/instagram">Instagram</a></div></div>';
         }).join("")
-      : '<p class="muted">No brands yet. Create one to start the demo.</p>';
+      : '<p class="muted">No brands yet. Create one to start.</p>';
     return (
-      '<div class="banner">Demo session on this device. Create a brand, generate a clip, then approve it in the inbox.</div>' +
+      '<div class="banner">This site records an 8-second branded preview in your browser. Approve is disabled until that clip exists. Google Flow and Instagram publish only run on your Makeo host.</div>' +
       "<h1>Your brands</h1>" + cards +
       '<div class="actions"><a class="btn primary" href="#/brands/new">New brand</a></div>'
     );
@@ -148,17 +273,18 @@
     b = b || {};
     return (
       '<section class="panel"><h1>' + (b.id ? "Edit " + esc(b.name) : "New brand") + "</h1>" +
+      '<p class="muted">Name is required. Add a pitch or hook if you want “today’s topic” generation — otherwise you must type a prompt later.</p>' +
       (err ? '<p class="error">' + esc(err) + "</p>" : "") +
       '<form id="brandForm">' +
       '<label>Name</label><input name="name" required value="' + esc(b.name || "") + '"/>' +
-      '<label>Slug</label><input name="slug" required value="' + esc(b.slug || "") + '" placeholder="makersnook"/>' +
+      '<label>Slug</label><input name="slug" required value="' + esc(b.slug || "") + '" placeholder="my-brand"/>' +
       '<label>Pitch — what you sell</label><textarea name="pitch" rows="3">' + esc(b.pitch || "") + "</textarea>" +
       '<label>Spoken hook</label><textarea name="hook" rows="2">' + esc(b.hook || "") + "</textarea>" +
-      '<label>Tone</label><input name="tone" value="' + esc(b.tone || "") + '" placeholder="Gen Z Hinglish"/>' +
-      '<label>Region</label><input name="region" value="' + esc(b.region || "IN") + '"/>' +
-      '<label>Logo</label><input name="logo" type="file" accept="image/*"/>' +
+      '<label>Tone</label><input name="tone" value="' + esc(b.tone || "") + '"/>' +
+      '<label>Region</label><input name="region" value="' + esc(b.region || "") + '" placeholder="e.g. US, IN"/>' +
+      '<label>Logo (optional)</label><input name="logo" type="file" accept="image/*"/>' +
       (b.logo ? '<p><img class="logo-preview" src="' + b.logo + '" alt="logo"/></p>' : "") +
-      '<label>Splash / end-card</label><input name="splash" type="file" accept="image/*,.gif"/>' +
+      '<label>Splash / end-card (optional)</label><input name="splash" type="file" accept="image/*,.gif"/>' +
       '<div class="row"><button class="btn primary" type="submit">Save brand</button></div></form>' +
       (b.id
         ? '<p><a href="#/brands/' + b.id + '/compose">Generate</a> · <a href="#/brands/' + b.id + '/inbox">Inbox</a> · <a href="#/brands/' + b.id + '/instagram">Instagram</a></p>'
@@ -171,44 +297,45 @@
     return (
       '<section class="panel"><h1>Instagram · ' + esc(b.name) + "</h1>" +
       (b.igConnected
-        ? '<p class="ok">Connected as @' + esc(b.igUsername || "brand") + ". Token is not sent anywhere — demo only stores the handle.</p>"
-        : '<p class="muted">Paste a handle for the demo. A real Graph token is only used on your Makeo worker host.</p>') +
+        ? '<p class="ok">Handle saved as @' + esc(b.igUsername || "brand") + ". This page does not send a token to Instagram.</p>"
+        : '<p class="muted">Save a handle so the inbox can label the brand. A real Graph token is only used on your Makeo host.</p>') +
       (err ? '<p class="error">' + esc(err) + "</p>" : "") +
       (ok ? '<p class="ok">' + esc(ok) + "</p>" : "") +
       '<form id="igForm"><label>Instagram username</label>' +
-      '<input name="username" required value="' + esc(b.igUsername || "") + '" placeholder="makersnook"/>' +
-      '<label>Access token (optional in demo)</label><input name="token" type="password" placeholder="not uploaded"/>' +
+      '<input name="username" required value="' + esc(b.igUsername || "") + '"/>' +
+      '<label>Access token (not uploaded)</label><input name="token" type="password" placeholder="optional"/>' +
       '<div class="row"><button class="btn primary" type="submit">Save</button>' +
       '<a class="btn ghost" href="#/brands/' + b.id + '/compose">Generate next</a></div></form></section>'
     );
   }
 
-  function compose(b) {
+  function compose(b, err) {
     return (
       '<section class="panel"><h1>Generate for ' + esc(b.name) + "</h1>" +
-      '<p class="muted">Trend picks a sample topic. Custom uses your Veo line. This demo renders a branded preview — the host worker is what calls Flow for a real mp4.</p>' +
+      '<p class="muted">A video is recorded here from your prompt (or from this brand’s pitch/hook). If those are missing, generation stops and the missing items are listed. Approve will not appear without a clip.</p>' +
+      (err ? '<p class="error">' + err + "</p>" : "") +
       '<form id="composeForm"><label>Mode</label><select name="mode" id="mode">' +
-      '<option value="trend">Today’s trending topic</option>' +
-      '<option value="custom">My own Veo prompt</option></select>' +
-      '<label>Custom prompt</label><textarea name="prompt" id="prompt" rows="4" placeholder="8-second vertical…"></textarea>' +
-      '<label>Caption (optional)</label><input name="caption" placeholder="Mention ' + esc(b.name) + '"/>' +
-      '<div class="row"><button class="btn primary" type="submit">Generate</button>' +
+      '<option value="custom">My own prompt</option>' +
+      '<option value="trend">Topic from this brand’s pitch</option></select>' +
+      '<label>Video prompt</label><textarea name="prompt" id="prompt" rows="4" placeholder="Describe the 8-second scene for ' + esc(b.name) + '…"></textarea>' +
+      '<label>Caption (optional)</label><input name="caption" placeholder="' + esc(b.name) + '"/>' +
+      '<div class="row"><button class="btn primary" type="submit" id="genBtn">Generate video</button>' +
       '<a class="btn ghost" href="#/brands/' + b.id + '/inbox">Inbox</a></div>' +
       '<p class="status" id="composeStatus"></p></form></section>'
     );
   }
 
   function reel(b, j) {
-    var media = b.splash
-      ? (b.splash.indexOf("image/") > -1 || b.splash.indexOf("data:image") === 0
-        ? '<img src="' + b.splash + '" alt=""/>'
-        : '<video src="' + b.splash + '" muted autoplay loop playsinline></video>')
-      : "";
-    return (
-      '<div class="reel">' + media +
-      '<div class="end"><div class="name">' + esc(b.name) + "</div>" +
-      "<div>" + esc(j.caption || b.hook || "Approve to post.") + "</div></div></div>"
-    );
+    var src = clips[j.id] || j.videoUrl;
+    if (src) {
+      return '<div class="reel"><video src="' + src + '" controls playsinline></video></div>';
+    }
+    return "";
+  }
+
+  function missingHtml(list) {
+    return "Video was not generated. Provide: <ul>" +
+      list.map(function (x) { return "<li>" + esc(x) + "</li>"; }).join("") + "</ul>";
   }
 
   function inbox(s, b) {
@@ -219,25 +346,30 @@
     return (
       "<h1>Inbox · " + esc(b.name) + "</h1>" +
       jobs.map(function (j) {
-        var pill = j.status === "posted" ? "posted" : j.status === "rejected" ? "rej" : "wait";
+        var pill = j.status === "posted" ? "posted" : j.status === "rejected" ? "rej" : j.status === "failed" ? "rej" : "wait";
         var body = "";
-        if (j.status === "running" || j.status === "queued") {
-          body = '<ol class="steps">' +
-            '<li class="' + (j.status ? "on" : "") + '">Picking prompt</li>' +
-            '<li class="' + (Date.now() > (j.brandAt || 0) ? "on" : "") + '">Generating 8s vertical</li>' +
-            '<li class="' + (Date.now() > (j.readyAt || 0) - 800 ? "on" : "") + '">Adding ' + esc(b.name) + " end-card</li>" +
-            "</ol><p class=\"muted\">Stay on this page or come back — it will land in awaiting approval.</p>";
+        if (j.status === "failed") {
+          body = '<p class="error">' + (j.error || "Video was not generated.") + "</p>" +
+            '<p><a href="#/brands/' + b.id + '/compose">Back to generate</a></p>';
+        } else if (j.status === "running") {
+          body = '<p class="muted">Rendering the 8-second preview… ' + esc(j.progress || "") + "</p>";
         } else {
-          body = reel(b, j) +
-            "<p><strong>" + esc(j.topic || "Custom prompt") + "</strong><br/>" + esc(j.caption) + "</p>";
-          if (j.status === "awaiting_approval") {
+          body = reel(b, j);
+          if (!clips[j.id] && !j.videoUrl) {
+            body += '<p class="error">No video on this job. The preview is only kept until you refresh. Generate again if the player is empty.</p>';
+          } else {
+            body += "<p><strong>" + esc(j.topic) + "</strong><br/>" + esc(j.caption) + "</p>";
+          }
+          if (j.status === "awaiting_approval" && (clips[j.id] || j.videoUrl)) {
             body += '<form class="approveForm" data-id="' + j.id + '">' +
               '<label>Caption</label><textarea name="caption" rows="2">' + esc(j.caption) + "</textarea>" +
               '<div class="row"><button class="btn ok" name="act" value="approve" type="submit">Approve &amp; post</button>' +
               '<button class="btn no" name="act" value="reject" type="submit">Reject</button></div></form>';
+          } else if (j.status === "awaiting_approval") {
+            body += '<p class="error">Approve is locked because there is no video.</p>';
           }
-          if (j.status === "publishing") body += '<p class="muted">Publishing to @' + esc(b.igUsername || b.slug) + "…</p>";
-          if (j.status === "posted") body += '<p class="ok">Posted to @' + esc(b.igUsername || b.slug) + " (demo — Instagram was not called).</p>";
+          if (j.status === "publishing") body += '<p class="muted">Marking posted for @' + esc(b.igUsername || b.slug) + " (Instagram API is not called from this page).</p>";
+          if (j.status === "posted") body += '<p class="ok">Marked posted for @' + esc(b.igUsername || b.slug) + ". Instagram was not called from this demo page.</p>";
           if (j.status === "rejected") body += "<p>Rejected. Nothing posted.</p>";
         }
         return '<div class="card"><span class="pill ' + pill + '">' + esc(j.status.replace(/_/g, " ")) +
@@ -257,7 +389,7 @@
         var s = state();
         if (kind === "signup") {
           if (s.users.some(function (u) { return u.email === email; })) {
-            render(authForm("signup", "That email already has an account. Sign in."));
+            render(shell(s, authForm("signup", "That email already has an account. Sign in."), { landing: true }));
             bindAuth("signup");
             return;
           }
@@ -267,9 +399,9 @@
           save(s);
           go("/home");
         } else {
-          var found = s.users.filter(function (u) { return u.email === email && u.pass === h; })[0];
+          var found = s.users.filter(function (x) { return x.email === email && x.pass === h; })[0];
           if (!found) {
-            render(authForm("login", "Unknown email or password."));
+            render(shell(s, authForm("login", "Unknown email or password."), { landing: true }));
             bindAuth("login");
             return;
           }
@@ -300,7 +432,7 @@
         rec.pitch = form.pitch.value.trim();
         rec.hook = form.hook.value.trim();
         rec.tone = form.tone.value.trim();
-        rec.region = form.region.value.trim() || "IN";
+        rec.region = form.region.value.trim();
         if (files[0]) rec.logo = files[0];
         if (files[1]) rec.splash = files[1];
         if (!existing) s.brands.push(rec);
@@ -323,7 +455,7 @@
       rec.igUsername = form.username.value.trim().replace(/^@/, "");
       rec.igConnected = true;
       save(s);
-      render(shell(s, igForm(rec, null, "Saved. Next: generate a clip.")));
+      render(shell(s, igForm(rec, null, "Saved. Next: generate a video.")));
       bindIg(rec);
     });
   }
@@ -332,6 +464,8 @@
     var form = document.getElementById("composeForm");
     var mode = document.getElementById("mode");
     var prompt = document.getElementById("prompt");
+    var status = document.getElementById("composeStatus");
+    var btn = document.getElementById("genBtn");
     if (!form) return;
     function sync() { prompt.disabled = mode.value !== "custom"; }
     mode.addEventListener("change", sync);
@@ -339,30 +473,52 @@
     form.addEventListener("submit", function (e) {
       e.preventDefault();
       var custom = prompt.value.trim();
-      if (mode.value === "custom" && !custom) {
-        document.getElementById("composeStatus").textContent = "Add a Veo prompt, or switch to today’s trend.";
+      var miss = missingForVideo(b, mode.value, custom);
+      if (miss.length) {
+        render(shell(state(), compose(b, missingHtml(miss))));
+        bindCompose(b);
         return;
       }
-      var s = state();
-      var u = user(s);
-      var pick = TRENDS[Math.floor(Math.random() * TRENDS.length)];
-      var now = Date.now();
-      var job = {
-        id: uid(),
-        userId: u.id,
-        brandId: b.id,
-        status: "queued",
-        source: mode.value === "custom" ? "custom" : "trend",
-        topic: mode.value === "custom" ? "Custom prompt" : pick.topic,
-        prompt: mode.value === "custom" ? custom : pick.why,
-        caption: (form.caption.value.trim() || pick.caption.replace("{name}", b.name)),
-        createdAt: now,
-        brandAt: now + 2200,
-        readyAt: now + 4800
-      };
-      s.jobs.push(job);
-      save(s);
-      go("/brands/" + b.id + "/inbox");
+      btn.disabled = true;
+      status.textContent = "Recording an 8-second preview from your " +
+        (mode.value === "custom" ? "prompt" : "brand pitch") + "…";
+      var line = sceneText(b, mode.value, custom);
+      var caption = form.caption.value.trim() || (b.name + (b.hook ? " — " + b.hook : ""));
+      renderClip(b, line, function (p) {
+        if (status) status.textContent = "Recording preview… " + Math.round(p * 100) + "%";
+      }).then(function (url) {
+        var s = state();
+        var u = user(s);
+        var job = {
+          id: uid(),
+          userId: u.id,
+          brandId: b.id,
+          status: "awaiting_approval",
+          source: mode.value,
+          topic: mode.value === "custom" ? "Your prompt" : "From " + b.name + " pitch",
+          prompt: line,
+          caption: caption
+        };
+        clips[job.id] = url;
+        s.jobs.push(job);
+        save(s);
+        go("/brands/" + b.id + "/inbox");
+      }).catch(function (err) {
+        var s = state();
+        var job = {
+          id: uid(),
+          userId: user(s).id,
+          brandId: b.id,
+          status: "failed",
+          topic: "Not generated",
+          caption: "",
+          error: "Video was not generated. " + (err && err.message ? err.message : "Unknown error.")
+        };
+        s.jobs.push(job);
+        save(s);
+        render(shell(s, compose(b, esc(job.error))));
+        bindCompose(b);
+      });
     });
   }
 
@@ -374,6 +530,13 @@
         var s = state();
         var j = jobBy(s, form.getAttribute("data-id"));
         if (!j) return;
+        if (act === "approve" && !clips[j.id] && !j.videoUrl) {
+          j.status = "failed";
+          j.error = "Video was not generated. Approve is not available.";
+          save(s);
+          paint();
+          return;
+        }
         j.caption = form.caption.value.trim() || j.caption;
         if (act === "reject") j.status = "rejected";
         else {
@@ -387,9 +550,7 @@
   }
 
   var timer = null;
-  function render(html) {
-    document.getElementById("app").innerHTML = html;
-  }
+  function render(html) { document.getElementById("app").innerHTML = html; }
 
   function paint() {
     var s = state();
@@ -398,12 +559,7 @@
     var path = route();
     var parts = path.split("/").filter(Boolean);
 
-    if (path === "/logout") {
-      s.session = null;
-      save(s);
-      go("/");
-      return;
-    }
+    if (path === "/logout") { s.session = null; save(s); go("/"); return; }
     if (path === "/" || path === "/how") {
       render(shell(s, landing(), { landing: true }));
       return;
@@ -418,14 +574,8 @@
       bindAuth("login");
       return;
     }
-    if (!user(s)) {
-      go("/login");
-      return;
-    }
-    if (path === "/home") {
-      render(shell(s, home(s)));
-      return;
-    }
+    if (!user(s)) { go("/login"); return; }
+    if (path === "/home") { render(shell(s, home(s))); return; }
     if (path === "/brands/new") {
       render(shell(s, brandForm(null)));
       bindBrand(null);
@@ -437,26 +587,15 @@
         render(shell(s, '<p class="error">Brand not found.</p>'));
         return;
       }
-      if (parts[2] === "instagram") {
-        render(shell(s, igForm(b)));
-        bindIg(b);
-        return;
-      }
-      if (parts[2] === "compose") {
-        render(shell(s, compose(b)));
-        bindCompose(b);
-        return;
-      }
+      if (parts[2] === "instagram") { render(shell(s, igForm(b))); bindIg(b); return; }
+      if (parts[2] === "compose") { render(shell(s, compose(b))); bindCompose(b); return; }
       if (parts[2] === "inbox") {
         render(shell(s, inbox(s, b)));
         bindInbox(b);
         var pending = s.jobs.some(function (j) {
-          return j.brandId === b.id && (j.status === "queued" || j.status === "running" || j.status === "publishing");
+          return j.brandId === b.id && j.status === "publishing";
         });
-        if (pending) {
-          clearTimeout(timer);
-          timer = setTimeout(paint, 400);
-        }
+        if (pending) { clearTimeout(timer); timer = setTimeout(paint, 400); }
         return;
       }
       render(shell(s, brandForm(b)));
