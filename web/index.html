@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
   <meta name="theme-color" content="#111111" />
   <meta name="color-scheme" content="dark" />
-  <meta name="description" content="Makeo — any brand can generate, brand, approve, and post an 8-second Reel." />
+  <meta name="description" content="Makeo — create a brand, generate an 8-second Reel, approve, post." />
   <meta name="mobile-web-app-capable" content="yes" />
   <meta name="apple-mobile-web-app-capable" content="yes" />
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
@@ -17,78 +17,7 @@
   <link rel="stylesheet" href="assets/styles.css" />
 </head>
 <body>
-  <header class="top">
-    <a class="brand" href="#top">
-      <img src="assets/icon.svg" width="28" height="28" alt="" />
-      <span>Makeo</span>
-    </a>
-    <nav>
-      <a href="#how">How it works</a>
-      <a href="#brands">For brands</a>
-      <a href="https://github.com/tmai-tech/Makeo">GitHub</a>
-    </nav>
-  </header>
-
-  <main id="top">
-    <section class="hero">
-      <p class="eyebrow">Waitlisted · BYO Gemini + Flow · Human approve</p>
-      <h1>Your brand. Your prompt.<br />An 8-second Reel.</h1>
-      <p class="lead">
-        Makeo runs the generate → brand → approve → Instagram pipeline for any
-        brand. Nothing posts without a click.
-      </p>
-      <div class="actions">
-        <a class="btn primary" href="#compose">Try the compose flow</a>
-        <a class="btn ghost" href="https://github.com/tmai-tech/Makeo">Read the repo</a>
-      </div>
-    </section>
-
-    <ol class="pipe" id="how" aria-label="Pipeline">
-      <li><strong>Prompt</strong><span>Paste a Veo line or pick today’s trend</span></li>
-      <li><strong>Generate</strong><span>Google Flow renders 8s, 9:16</span></li>
-      <li><strong>Brand</strong><span>Your splash, logo, and feed inset</span></li>
-      <li><strong>Approve</strong><span>You click. Reject posts nothing</span></li>
-      <li><strong>Publish</strong><span>Instagram Reel on your account</span></li>
-    </ol>
-
-    <section class="panel" id="compose">
-      <h2>Compose</h2>
-      <p class="muted">This public page is the product site. Generation runs on your Makeo worker — this form shows the same choices you get after login.</p>
-      <form id="composeForm">
-        <label for="brandName">Brand name</label>
-        <input id="brandName" name="brand" type="text" placeholder="Acme" required />
-        <label for="mode">Mode</label>
-        <select id="mode" name="mode">
-          <option value="trend">Today’s trending topic</option>
-          <option value="custom">My own Veo prompt</option>
-        </select>
-        <label for="prompt">Custom prompt</label>
-        <textarea id="prompt" name="prompt" rows="4" placeholder="8-second vertical, Indian street at dusk…"></textarea>
-        <button type="submit" class="btn primary">Queue a job</button>
-        <p class="status" id="composeStatus" role="status"></p>
-      </form>
-    </section>
-
-    <section class="grid" id="brands">
-      <article>
-        <h3>Your keys</h3>
-        <p>Each brand brings Gemini and a Google Flow login. Makeo does not spend a shared credit pool.</p>
-      </article>
-      <article>
-        <h3>Your Instagram</h3>
-        <p>Paste a long-lived Graph token for that brand. Tokens never fall back to another account.</p>
-      </article>
-      <article>
-        <h3>Your approve</h3>
-        <p>Inbox on the hosted app. Discord buttons are optional and call the same job row.</p>
-      </article>
-    </section>
-  </main>
-
-  <footer>
-    <p>Live at <a href="https://tmai-tech.github.io/Makeo/">tmai-tech.github.io/Makeo</a></p>
-    <p class="muted">Worker + API stay on the clone-and-run host. This site deploys from <code>web/</code> on every push to main.</p>
-  </footer>
+  <div id="app"></div>
   <script src="assets/app.js"></script>
 </body>
 </html>

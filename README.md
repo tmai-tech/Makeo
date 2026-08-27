@@ -12,9 +12,10 @@ This repo is the product. The architecture and PR plan live in
 
 **Public site (GitHub Pages):** **https://tmai-tech.github.io/Makeo/**
 
+Walk the live demo there: **Create account → New brand → Instagram → Generate → Inbox (approve or reject)**. Accounts stay in that browser. Real Veo + Instagram still need the clone-and-run worker.
+
 Same hosting path as the other tmai-tech static apps: `web/` deploys on every
-push to `main` via `.github/workflows/deploy-pages.yml`. The FastAPI worker
-still runs on your clone-and-run host.
+push to `main` via `.github/workflows/deploy-pages.yml`.
 
 **v1 is waitlisted.** Each brand brings its own Gemini key and Google Flow
 login. Approval is in-app (Discord comes later). The worker is this git
