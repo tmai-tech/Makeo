@@ -1,0 +1,46 @@
+{
+  "schema_version": 1,
+  "brand_id": "buzzit",
+  "name": "Buzzit",
+  "slug": "buzzit",
+  "pitch": "Buzzit is an Indian short-video and live-streaming app (like Instagram\nReels + live, made in India). Creators post short videos, go live, receive gifts\nfrom viewers as coins, and withdraw those coins as real money straight to UPI or\na bank account. The pitch: you are already making reels for free somewhere else --\non Buzzit the same content pays you.",
+  "hook": "The video must end on the Buzzit hook: making money from the reels you already make. The spoken line should sell that, not the news story.",
+  "tone": "Gen Z Hinglish register",
+  "locale": {
+    "language": "en-IN",
+    "region": "IN",
+    "setting_rule": "Set it in INDIA with Indian people, Indian locations, and Indian English or Hinglish. No Western cafes, no generic American settings. This is non-negotiable."
+  },
+  "audience": "Gen Z",
+  "forbidden_topics": [
+    "no political side",
+    "name no politician or party",
+    "skip grim, tragic, or communal"
+  ],
+  "phone_screen_rule": "If a phone appears in shot, its screen must NEVER be blank, off, or showing a generic app. Describe it as: \"the phone screen clearly facing the camera showing a vertical short-video feed app with a dark background, a video playing, and gold accent icons\". A blank or invented screen wastes the shot -- the screen is the product.",
+  "instructions_template": "You write ONE 8-second vertical ad for Buzzit, an Indian app, riding today's trending topic so it feels native to the feed rather than like an ad.\n\n{brand}\n\nToday's trending topics in India:\n{headlines}\n\n{recent}\nRules:\n- Pick the ONE topic with the most genuine Gen Z pull that you can connect to Buzzit naturally. Culture, money/side-hustle, creators, internet drama, entertainment are ideal.\n- Do NOT reuse any angle listed under \"Already covered\" above, even reworded. Pick a genuinely different story. If every strong story is already covered, take a fresh angle on a DIFFERENT headline rather than repeating one.\n- The culture and memes AROUND a story are fair game, but take no political side, name no politician or party, and skip anything grim, tragic, or communal.\n- {hook}\n- {setting_rule}\n- veo_prompt must be ONE paragraph describing shot, subject, camera move, lighting, mood, and the exact spoken line. Vertical 9:16, 8 seconds. No text overlays, no logos, no watermarks (we add branding later).\n- {phone_screen_rule}\n- caption: {caption_template}\n\nReturn ONLY valid JSON:\n{{\"topic\":\"...\",\"why_genz\":\"...\",\"buzzit_link\":\"how it ties to Buzzit\",\"veo_prompt\":\"...\",\"caption\":\"...\"}}",
+  "feeds": [
+    "https://news.google.com/rss/search?q=when:1d+gen+z+OR+viral+OR+trending&hl=en-IN&gl=IN&ceid=IN:en",
+    "https://trends.google.com/trending/rss?geo=IN"
+  ],
+  "rss_query": "when:1d+gen+z+OR+viral+OR+trending",
+  "headline_limit": 25,
+  "dedup_max_topics": 10,
+  "caption_template": "max 120 chars, Gen Z Hinglish register, mention Buzzit, 3 hashtags max",
+  "caption_max_chars": 120,
+  "hashtag_max": 3,
+  "model": "gemini-3.6-flash",
+  "manual_caption": "Buzz. Share. Earn. Only on Buzzit \ud83d\udcb8 #Buzzit #CreatorEconomy",
+  "pip_enabled": true,
+  "pip_from_s": 4.0,
+  "pip_border_color": "0xE8B84B",
+  "endcard_seconds": 3.0,
+  "endcard_mode": "splash",
+  "assets": {
+    "logo": "screenshot/logo.png",
+    "splash": "screenshot/splash_video.gif",
+    "pip_image": "screenshot/feedscreen.png"
+  },
+  "flow_project_url": "https://labs.google/fx/tools/flow/project/84c30188-252c-4b46-bdb7-99a4699f66e7",
+  "flow_profile_dir": ".chrome-profile"
+}
