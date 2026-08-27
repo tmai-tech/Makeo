@@ -27,14 +27,20 @@
     s.brands = s.brands || [];
     s.jobs = s.jobs || [];
     s.session = s.session || null;
+    s.deletedBrandIds = s.deletedBrandIds || [];
     PREV_KEYS.forEach(function (k) {
       try {
         var old = JSON.parse(localStorage.getItem(k) || "{}");
         mergeUsers(s.users, old.users);
         (old.brands || []).forEach(function (b) {
-          if (b && b.id && !s.brands.some(function (x) { return x.id === b.id; })) s.brands.push(b);
+          if (!b || !b.id) return;
+          if (s.deletedBrandIds.indexOf(b.id) >= 0) return;
+          if (!s.brands.some(function (x) { return x.id === b.id; })) s.brands.push(b);
         });
       } catch (e) {}
+    });
+    s.brands = s.brands.filter(function (b) {
+      return b && b.id && s.deletedBrandIds.indexOf(b.id) < 0;
     });
     return s;
   }
@@ -435,10 +441,11 @@
       '<label>Logo (optional)</label><input name="logo" type="file" accept="image/*"/>' +
       (b.logo ? '<p><img class="logo-preview" src="' + b.logo + '" alt="logo"/></p>' : "") +
       '<label>Splash / end-card (optional)</label><input name="splash" type="file" accept="image/*,.gif"/>' +
-      '<div class="row"><button class="btn primary" type="submit">Save and enter Flow key</button>' +
-      (b.id ? '<button type="button" class="btn no deleteBrand" data-id="' + b.id +
-        '" data-name="' + esc(b.name) + '">Delete this brand</button>' : "") +
-      "</div></form>" +
+      '<div class="row"><button class="btn primary" type="submit">Save and enter Flow key</button></div></form>' +
+      (b.id
+        ? '<div class="row"><button type="button" class="btn no deleteBrand" data-id="' + b.id +
+          '" data-name="' + esc(b.name) + '">Delete this brand</button></div>'
+        : "") +
       (b.id
         ? '<p><a href="#/brands/' + b.id + '/keys">Google Flow key</a> · <a href="#/brands/' + b.id + '/compose">Generate</a> · <a href="#/brands/' + b.id + '/inbox">Inbox</a></p>'
         : "") +
@@ -628,23 +635,32 @@
       return;
     }
     var s = state();
-    var u = user(s);
     var b = brandBy(s, id);
+    if (!b) {
+      location.hash = "#/home";
+      paint();
+      return;
+    }
     if (!ownBrand(s, b)) return;
+    s.deletedBrandIds = s.deletedBrandIds || [];
+    if (s.deletedBrandIds.indexOf(id) < 0) s.deletedBrandIds.push(id);
     s.brands = s.brands.filter(function (x) { return x.id !== id; });
     s.jobs = s.jobs.filter(function (j) { return j.brandId !== id; });
     save(s);
-    if (route() === "/home") paint();
-    else go("/home");
+    PREV_KEYS.forEach(function (k) {
+      try {
+        var old = JSON.parse(localStorage.getItem(k) || "{}");
+        if (old.brands) {
+          old.brands = old.brands.filter(function (x) { return x.id !== id; });
+          localStorage.setItem(k, JSON.stringify(old));
+        }
+      } catch (e) {}
+    });
+    location.hash = "#/home";
+    paint();
   }
 
-  function bindDeletes() {
-    document.querySelectorAll(".deleteBrand").forEach(function (btn) {
-      btn.addEventListener("click", function () {
-        deleteBrand(btn.getAttribute("data-id"), btn.getAttribute("data-name"));
-      });
-    });
-  }
+  function bindDeletes() {}
 
   function bindBrand(existing) {
     var form = document.getElementById("brandForm");
@@ -881,5 +897,12 @@
   }
 
   window.addEventListener("hashchange", paint);
+  document.addEventListener("click", function (e) {
+    var btn = e.target && e.target.closest && e.target.closest(".deleteBrand");
+    if (!btn) return;
+    e.preventDefault();
+    e.stopPropagation();
+    deleteBrand(btn.getAttribute("data-id"), btn.getAttribute("data-name"));
+  });
   paint();
 })();
