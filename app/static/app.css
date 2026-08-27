@@ -1,0 +1,18 @@
+:root { --bg:#111; --fg:#eee; --mut:#9a9a9a; --ok:#1a7f37; --line:#2a2a2a; --gold:#E8B84B; }
+* { box-sizing: border-box; }
+body { font-family: system-ui, sans-serif; background: var(--bg); color: var(--fg);
+       max-width: 720px; margin: 0 auto; padding: 24px; }
+a { color: var(--gold); }
+nav { display:flex; gap:16px; margin-bottom:24px; }
+h1 { font-size: 1.4rem; }
+label { display:block; margin:12px 0 4px; color: var(--mut); font-size: .9rem; }
+input, textarea, select { width:100%; padding:10px; border-radius:8px; border:1px solid var(--line);
+  background:#1c1c1c; color:var(--fg); }
+textarea { min-height: 100px; }
+button, .btn { display:inline-block; margin-top:12px; padding:10px 16px; border:0; border-radius:8px;
+  background: var(--gold); color:#111; font-weight:600; cursor:pointer; text-decoration:none; }
+button.no { background:#3a3a3a; color:#eee; }
+.card { background:#1c1c1c; padding:16px; border-radius:12px; margin:12px 0; }
+.alert { background:#3a2208; border:1px solid var(--gold); padding:10px 12px; border-radius:8px; margin:8px 0; }
+.mut { color: var(--mut); }
+.error { color:#f66; }

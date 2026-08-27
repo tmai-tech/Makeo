@@ -1,0 +1,12 @@
+<!doctype html>
+<meta name=viewport content="width=device-width,initial-scale=1">
+<title>{% block title %}Makeo{% endblock %}</title>
+<link rel="stylesheet" href="/static/app.css">
+<nav>
+  <a href="/">Home</a>
+  {% if user %}<a href="/logout">Log out</a> <span class="mut">{{ user.email }}</span>{% endif %}
+</nav>
+{% for a in alerts or [] %}
+  <div class="alert">{{ a.message }}</div>
+{% endfor %}
+{% block body %}{% endblock %}

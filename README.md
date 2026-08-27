@@ -28,7 +28,14 @@ only runner:
 ```
 set MAKEO_MASTER_KEY=...          # Fernet key from cryptography.fernet.Fernet.generate_key()
 python -m makeo.enqueue --brand buzzit
-python worker.py                  # PR 6b
+python worker.py
+```
+
+Site (one API process, port 8780):
+
+```
+python -m makeo.create_user you@brand.com 'password'
+python -m uvicorn app.main:app --host 127.0.0.1 --port 8780 --workers 1
 ```
 
 Each enqueue copies brand.json + assets into `data/tenants/<slug>/jobs/<id>/`.

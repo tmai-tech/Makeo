@@ -7,6 +7,7 @@
 # Makeo tenant data (jobs, assets, sqlite, per-brand chrome profiles).
 # Must stay untracked -- videos and tokens land here in later PRs.
 data/
+.venv/
 
 # Generated artifacts
 out/

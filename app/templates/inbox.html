@@ -1,0 +1,35 @@
+{% extends "base.html" %}
+{% block title %}Inbox · Makeo{% endblock %}
+{% block body %}
+<h1>Inbox · {{ brand.name }}</h1>
+{% for j in jobs %}
+  <div class="card">
+    <strong>{{ j.status }}</strong>
+    {% if j.video_relpath %}
+      <video src="/jobs/{{ j.id }}/preview" controls playsinline style="width:100%;border-radius:8px;background:#000"></video>
+    {% endif %}
+    <form method="post" action="/v1/jobs/{{ j.id }}/approve">
+      <input type="hidden" name="csrf" value="{{ csrf }}">
+      <label>Caption</label>
+      <textarea name="caption">{{ j.caption_override or j.caption or '' }}</textarea>
+      {% if j.status == 'awaiting_approval' %}
+        <button>Approve &amp; post</button>
+      {% endif %}
+    </form>
+    {% if j.status == 'awaiting_approval' %}
+    <form method="post" action="/v1/jobs/{{ j.id }}/reject">
+      <input type="hidden" name="csrf" value="{{ csrf }}">
+      <button class="no">Reject</button>
+    </form>
+    {% endif %}
+    {% if j.status == 'publish_failed' %}
+    <form method="post" action="/v1/jobs/{{ j.id }}/retry-publish">
+      <input type="hidden" name="csrf" value="{{ csrf }}">
+      <button>Retry publish</button>
+    </form>
+    <p class="error">{{ j.last_publish_error }}</p>
+    {% endif %}
+    {% if j.permalink %}<p><a href="{{ j.permalink }}">Posted</a></p>{% endif %}
+  </div>
+{% endfor %}
+{% endblock %}

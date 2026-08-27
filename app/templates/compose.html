@@ -1,0 +1,22 @@
+{% extends "base.html" %}
+{% block title %}Generate · Makeo{% endblock %}
+{% block body %}
+<h1>Generate for {{ brand.name }}</h1>
+<p class="mut">Queue: {{ queued }} waiting. Nothing posts without your approve.</p>
+<form method="post">
+  <input type="hidden" name="csrf" value="{{ csrf }}">
+  <label>Custom Veo prompt (leave blank to use today's trends)</label>
+  <textarea name="prompt" placeholder="8-second vertical..."></textarea>
+  <label>Caption (optional, custom path only)</label>
+  <input name="caption">
+  <button>Generate</button>
+</form>
+<h2>Library</h2>
+{% for j in jobs %}
+  <div class="card">
+    <a href="/jobs/{{ j.id }}">{{ j.status }}</a>
+    <span class="mut">{{ j.source }} · {{ j.created_at }}</span>
+    <div>{{ j.caption_override or j.caption or '' }}</div>
+  </div>
+{% endfor %}
+{% endblock %}

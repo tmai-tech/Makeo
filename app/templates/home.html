@@ -1,0 +1,11 @@
+{% extends "base.html" %}
+{% block body %}
+<h1>Your brands</h1>
+{% for b in brands %}
+  <div class="card">
+    <a href="/brands/{{ b.id }}">{{ b.name }}</a>
+    <div class="mut">{{ b.slug }}</div>
+  </div>
+{% endfor %}
+<a class="btn" href="/brands/new">New brand</a>
+{% endblock %}

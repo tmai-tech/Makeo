@@ -1,0 +1,28 @@
+{% extends "base.html" %}
+{% block title %}Brand · Makeo{% endblock %}
+{% block body %}
+<h1>{% if brand %}Edit {{ brand.name }}{% else %}New brand{% endif %}</h1>
+<form method="post" enctype="multipart/form-data">
+  <input type="hidden" name="csrf" value="{{ csrf }}">
+  <label>Name</label><input name="name" value="{{ brand.name if brand else '' }}" required>
+  <label>Slug</label><input name="slug" value="{{ brand.slug if brand else '' }}" required>
+  <label>Pitch</label><textarea name="pitch">{{ cfg.pitch if cfg else '' }}</textarea>
+  <label>Hook</label><textarea name="hook">{{ cfg.hook if cfg else '' }}</textarea>
+  <label>Tone</label><input name="tone" value="{{ cfg.tone if cfg else '' }}">
+  <label>Locale region (ISO)</label><input name="region" value="{{ cfg.locale.region if cfg else 'IN' }}">
+  <label>Setting rule</label><textarea name="setting_rule">{{ cfg.locale.setting_rule if cfg else '' }}</textarea>
+  <label>Phone screen rule</label><textarea name="phone_screen_rule">{{ cfg.phone_screen_rule if cfg else '' }}</textarea>
+  <label>Caption template</label><input name="caption_template" value="{{ cfg.caption_template if cfg else '' }}">
+  <label>Gemini API key (BYO)</label><input name="gemini_key" type="password" placeholder="leave blank to keep">
+  <label>Flow project URL</label><input name="flow_project_url" value="{{ cfg.flow_project_url if cfg else '' }}">
+  <label>Logo</label><input type="file" name="logo" accept="image/*">
+  <label>Splash / end-card</label><input type="file" name="splash" accept="image/*,.gif,.mp4">
+  <label>PiP screenshot</label><input type="file" name="pip_image" accept="image/*">
+  <button>Save</button>
+</form>
+{% if brand %}
+  <p><a href="/brands/{{ brand.id }}/compose">Generate a video</a> ·
+     <a href="/brands/{{ brand.id }}/inbox">Inbox</a> ·
+     <a href="/brands/{{ brand.id }}/instagram">Instagram</a></p>
+{% endif %}
+{% endblock %}

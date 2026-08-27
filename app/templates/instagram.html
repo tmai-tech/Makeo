@@ -1,0 +1,17 @@
+{% extends "base.html" %}
+{% block title %}Instagram · Makeo{% endblock %}
+{% block body %}
+<h1>Instagram · {{ brand.name }}</h1>
+{% if ig %}
+  <p>Connected as <strong>@{{ ig.username }}</strong> ({{ ig.ig_user_id }})</p>
+  {% if ig.token_expires_at %}<p class="mut">Expires {{ ig.token_expires_at }}</p>{% endif %}
+{% else %}
+  <p class="mut">No account yet. Paste a long-lived token.</p>
+{% endif %}
+<form method="post">
+  <input type="hidden" name="csrf" value="{{ csrf }}">
+  <label>IG user id</label><input name="ig_user_id" value="{{ ig.ig_user_id if ig else '' }}" required>
+  <label>Long-lived access token</label><input name="access_token" type="password" required>
+  <button>Save token</button>
+</form>
+{% endblock %}
