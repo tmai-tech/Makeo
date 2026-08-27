@@ -1,3 +1,4 @@
+# DEV ONLY. Product scheduling is makeo/scheduler.py on the Makeo worker host.
 # Register (or update) the 7pm daily task. Run once, from an ADMIN PowerShell:
 #
 #   powershell -ExecutionPolicy Bypass -File schedule_daily.ps1
