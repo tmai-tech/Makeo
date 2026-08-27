@@ -425,10 +425,19 @@
       : (u
         ? '<a href="#/home">Home</a><a href="#/help">Tutorial</a><span class="who">' + esc(u.email) + "</span><a href=\"#/logout\">Log out</a>"
         : '<a href="#/help">Tutorial</a><a href="#/login">Sign in</a><a href="#/signup">Create account</a>');
+    var preview = location.pathname.indexOf("/preview/fal") >= 0;
     return (
       '<header class="top"><a class="brand" href="#/"><img src="assets/icon.svg" width="28" height="28" alt=""/><span>Makeo</span></a><nav>' +
-      nav + "</nav></header><main>" + inner + "</main>" +
-      "<footer><p>Live at <a href=\"https://tmai-tech.github.io/Makeo/\">tmai-tech.github.io/Makeo</a></p></footer>"
+      nav + "</nav></header>" +
+      (preview
+        ? '<div class="banner">PREVIEW of the fal.ai branch. This is not the live site. Live stays at <a href="https://tmai-tech.github.io/Makeo/">tmai-tech.github.io/Makeo</a>.</div>'
+        : "") +
+      "<main>" + inner + "</main>" +
+      "<footer><p>" +
+      (preview
+        ? 'Preview · <a href="https://tmai-tech.github.io/Makeo/preview/fal/">/preview/fal/</a>'
+        : 'Live at <a href="https://tmai-tech.github.io/Makeo/">tmai-tech.github.io/Makeo</a>') +
+      "</p></footer>"
     );
   }
 
