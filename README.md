@@ -41,8 +41,14 @@ python -m uvicorn app.main:app --host 127.0.0.1 --port 8780 --workers 1
 Each enqueue copies brand.json + assets into `data/tenants/<slug>/jobs/<id>/`.
 The worker must use only that prefix.
 
-`n8n-genz-daily.json` is an unsupported leftover (old n8n + Postiz path).
+`legacy/n8n-genz-daily.json` is an unsupported leftover (old n8n + Postiz path).
 Do not run it; do not build on it.
+
+Nightly ops (token slide-refresh + 30-day video retention):
+
+```
+python -m makeo.ops
+```
 
 ## Reference tenant: Buzzit
 
