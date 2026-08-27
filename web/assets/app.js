@@ -108,6 +108,9 @@
   function missingForVideo(brand, mode, prompt) {
     var miss = [];
     if (!brand || !brand.name) miss.push("a brand name");
+    if (!(brand.geminiKey || "").trim()) {
+      miss.push("a Gemini API key (Brand → Google generation). Get one at aistudio.google.com/apikey. Google Flow cannot run inside this website — the key calls Veo 3.1.");
+    }
     if (mode === "custom") {
       if (!(prompt || "").trim()) miss.push("your own video prompt");
     } else {
@@ -115,10 +118,74 @@
         miss.push("a brand pitch or spoken hook (needed when you use “today’s topic”)");
       }
     }
-    if (typeof MediaRecorder === "undefined" || !HTMLCanvasElement.prototype.captureStream) {
-      miss.push("a browser that can record canvas video (Chrome or Edge)");
-    }
     return miss;
+  }
+  function veoError(data, status) {
+    var msg = (data && data.error && data.error.message) || (data && data.message) || "";
+    if (status === 400 && !msg) msg = "Google rejected the request (400). Check the key and that Veo is enabled on this project.";
+    if (status === 403) msg = msg || "This Gemini key is not allowed to generate Veo video.";
+    if (status === 429) msg = msg || "Google rate-limited this key. Wait and try again.";
+    return msg || ("Google video API failed (HTTP " + status + ").");
+  }
+  function parseVeoOp(data) {
+    var r = data && (data.response || data);
+    var samples = (r && r.generateVideoResponse && r.generateVideoResponse.generatedSamples)
+      || (r && r.generatedVideos)
+      || (r && r.generateVideoResponse && r.generateVideoResponse.generatedVideos)
+      || [];
+    var vid = samples[0] && (samples[0].video || samples[0]);
+    if (!vid) return null;
+    return { uri: vid.uri || vid.videoUri, bytes: vid.videoBytes || vid.bytesBase64Encoded };
+  }
+  function generateVeo(key, prompt, onTick) {
+    var base = "https://generativelanguage.googleapis.com/v1beta";
+    var model = "veo-3.1-generate-preview";
+    var headers = { "Content-Type": "application/json", "x-goog-api-key": key };
+    return fetch(base + "/models/" + model + ":predictLongRunning", {
+      method: "POST",
+      headers: headers,
+      body: JSON.stringify({
+        instances: [{ prompt: prompt }],
+        parameters: { aspectRatio: "9:16", durationSeconds: 8 }
+      })
+    }).then(function (res) {
+      return res.json().then(function (data) {
+        if (!res.ok || data.error) throw new Error(veoError(data, res.status));
+        if (!data.name) throw new Error("Google did not start a video job. " + (data.error && data.error.message || JSON.stringify(data).slice(0, 240)));
+        return data.name;
+      });
+    }).then(function (name) {
+      var tries = 0;
+      function poll() {
+        tries += 1;
+        if (onTick) onTick("Waiting on Veo… " + tries * 8 + "s (usually 30–90s)");
+        return fetch(base + "/" + name, { headers: headers }).then(function (res) {
+          return res.json().then(function (data) {
+            if (!res.ok || data.error) throw new Error(veoError(data, res.status));
+            if (!data.done) {
+              if (tries > 24) throw new Error("Veo did not finish in 3 minutes. Check the key quota in AI Studio and try again.");
+              return new Promise(function (r) { setTimeout(r, 8000); }).then(poll);
+            }
+            if (data.error) throw new Error(data.error.message || "Veo job failed.");
+            var got = parseVeoOp(data);
+            if (!got) throw new Error("Veo finished but returned no video. " + JSON.stringify(data).slice(0, 300));
+            if (got.bytes) {
+              var bin = atob(got.bytes);
+              var arr = new Uint8Array(bin.length);
+              for (var i = 0; i < bin.length; i++) arr[i] = bin.charCodeAt(i);
+              return URL.createObjectURL(new Blob([arr], { type: "video/mp4" }));
+            }
+            return fetch(got.uri, { headers: { "x-goog-api-key": key } }).then(function (v) {
+              if (!v.ok) throw new Error("Could not download the Veo file (HTTP " + v.status + ").");
+              return v.blob();
+            }).then(function (blob) {
+              return URL.createObjectURL(blob);
+            });
+          });
+        });
+      }
+      return poll();
+    });
   }
   function sceneText(brand, mode, prompt) {
     if (mode === "custom") return prompt.trim();
@@ -289,7 +356,7 @@
         }).join("")
       : '<p class="muted">No brands yet. Create one to start.</p>';
     return (
-      '<div class="banner">This site records an 8-second branded preview in your browser. Approve is disabled until that clip exists. Google Flow and Instagram publish only run on your Makeo host.</div>' +
+      '<div class="banner">Real video needs a <strong>Gemini API key</strong> on the brand (Google generation). That key calls <strong>Veo 3.1</strong> — Google Flow’s web UI cannot run in this browser. Without a key, Generate will stop and list what is missing.</div>' +
       "<h1>Your brands</h1>" + cards +
       '<div class="actions"><a class="btn primary" href="#/brands/new">New brand</a></div>'
     );
@@ -299,7 +366,7 @@
     b = b || {};
     return (
       '<section class="panel"><h1>' + (b.id ? "Edit " + esc(b.name) : "New brand") + "</h1>" +
-      '<p class="muted">Name is required. Add a pitch or hook if you want “today’s topic” generation — otherwise you must type a prompt later.</p>' +
+      '<p class="muted">Name is required. For a real Google video you must paste a Gemini API key below.</p>' +
       (err ? '<p class="error">' + esc(err) + "</p>" : "") +
       '<form id="brandForm">' +
       '<label>Name</label><input name="name" required value="' + esc(b.name || "") + '"/>' +
@@ -308,6 +375,14 @@
       '<label>Spoken hook</label><textarea name="hook" rows="2">' + esc(b.hook || "") + "</textarea>" +
       '<label>Tone</label><input name="tone" value="' + esc(b.tone || "") + '"/>' +
       '<label>Region</label><input name="region" value="' + esc(b.region || "") + '" placeholder="e.g. US, IN"/>' +
+      '<h2>Google generation</h2>' +
+      '<p class="muted">Google <strong>Flow</strong> (labs.google/fx) is a logged-in Chrome session — it cannot run on this website. Paste a <strong>Gemini API key</strong> so this page can call <strong>Veo 3.1</strong> (same family of models Flow uses). Get a key: <a href="https://aistudio.google.com/apikey" target="_blank" rel="noopener">aistudio.google.com/apikey</a>. The key stays in this browser only.</p>' +
+      '<label>Gemini API key (required to generate video)</label>' +
+      '<input name="geminiKey" type="password" autocomplete="off" placeholder="' +
+      (b.geminiKey ? "Saved — paste a new key to replace" : "AIza…") + '"/>' +
+      (b.geminiKey ? '<p class="ok">Key on file ending …' + esc(b.geminiKey.slice(-4)) + "</p>" : '<p class="error">No Gemini key saved yet. Generate will refuse until you add one.</p>') +
+      '<label>Flow project URL (optional — used by the desktop worker, not this page)</label>' +
+      '<input name="flowProjectUrl" value="' + esc(b.flowProjectUrl || "") + '" placeholder="https://labs.google/fx/tools/flow/project/…"/>' +
       '<label>Logo (optional)</label><input name="logo" type="file" accept="image/*"/>' +
       (b.logo ? '<p><img class="logo-preview" src="' + b.logo + '" alt="logo"/></p>' : "") +
       '<label>Splash / end-card (optional)</label><input name="splash" type="file" accept="image/*,.gif"/>' +
@@ -338,7 +413,10 @@
   function compose(b, err) {
     return (
       '<section class="panel"><h1>Generate for ' + esc(b.name) + "</h1>" +
-      '<p class="muted">A video is recorded here from your prompt (or from this brand’s pitch/hook). If those are missing, generation stops and the missing items are listed. Approve will not appear without a clip.</p>' +
+      '<p class="muted">This calls <strong>Veo 3.1</strong> with the Gemini key saved on the brand. Google Flow’s website is not opened from here. Without a key or a prompt, nothing is generated and the missing items are listed.</p>' +
+      (b.geminiKey
+        ? '<p class="ok">Gemini key on file (…' + esc(b.geminiKey.slice(-4)) + ').</p>'
+        : '<p class="error">No Gemini key on this brand. <a href="#/brands/' + b.id + '">Add it under Google generation</a> first.</p>') +
       (err ? '<p class="error">' + err + "</p>" : "") +
       '<form id="composeForm"><label>Mode</label><select name="mode" id="mode">' +
       '<option value="custom">My own prompt</option>' +
@@ -482,6 +560,8 @@
         rec.hook = form.hook.value.trim();
         rec.tone = form.tone.value.trim();
         rec.region = form.region.value.trim();
+        if (form.geminiKey.value.trim()) rec.geminiKey = form.geminiKey.value.trim();
+        rec.flowProjectUrl = form.flowProjectUrl.value.trim();
         if (files[0]) rec.logo = files[0];
         if (files[1]) rec.splash = files[1];
         if (!existing) s.brands.push(rec);
@@ -529,12 +609,11 @@
         return;
       }
       btn.disabled = true;
-      status.textContent = "Recording an 8-second preview from your " +
-        (mode.value === "custom" ? "prompt" : "brand pitch") + "…";
       var line = sceneText(b, mode.value, custom);
       var caption = form.caption.value.trim() || (b.name + (b.hook ? " — " + b.hook : ""));
-      renderClip(b, line, function (p) {
-        if (status) status.textContent = "Recording preview… " + Math.round(p * 100) + "%";
+      status.textContent = "Starting Veo 3.1 with your Gemini key…";
+      generateVeo(b.geminiKey.trim(), line, function (msg) {
+        if (status) status.textContent = msg;
       }).then(function (url) {
         var s = state();
         var u = user(s);
@@ -561,7 +640,11 @@
           status: "failed",
           topic: "Not generated",
           caption: "",
-          error: "Video was not generated. " + (err && err.message ? err.message : "Unknown error.")
+          error: "Video was not generated. " + (err && err.message
+            ? (err.message.indexOf("Failed to fetch") >= 0
+              ? "The browser could not reach Google’s Veo API (blocked or offline). Confirm the Gemini key and that you opened https://tmai-tech.github.io/Makeo/"
+              : err.message)
+            : "Unknown error.")
         };
         s.jobs.push(job);
         save(s);
