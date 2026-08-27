@@ -350,19 +350,30 @@
       "<p>After you are in, you will see “Your brands”.</p>" +
       '<p class="click">Click <strong>New brand</strong>. In <strong>Name</strong> type your shop or brand (example: Makers Nook). You can leave the other boxes empty. Click <strong>Save and enter Flow key</strong>.</p></div>' +
 
-      '<div class="how-step"><h3><span class="n">3</span> Get a Google Flow key (new tab)</h3>' +
-      "<p>Google makes the video. You must bring your own key. It is free to create. You need a normal Google / Gmail sign-in.</p>" +
-      '<p class="click">Click this yellow button. A new tab opens. Keep this Makeo tab open.</p>' +
-      '<p><a class="btn primary" href="https://aistudio.google.com/apikey" target="_blank" rel="noopener">Open Google to get my key</a></p>' +
-      "<p>On the Google page, do this:</p>" +
+      '<div class="how-step"><h3><span class="n">3</span> Get a Google Flow key (skip the button that fails)</h3>' +
+      "<p>Google makes the video. You must bring your own key. Use a <strong>personal Gmail</strong> (not a work/school email if you can). Keep the Makeo tab open.</p>" +
+      '<p class="error">If you see <strong>Failed to create project</strong>, do <em>not</em> click “Create API key in new project” again. That Google page is broken for many people. Use Plan B below.</p>' +
+      "<p><strong>Plan A — only if Google already shows a project name</strong></p>" +
+      '<p><a class="btn primary" href="https://aistudio.google.com/apikey" target="_blank" rel="noopener">Open Google AI Studio keys</a></p>' +
       "<ol>" +
-      "<li>If Google asks you to sign in, sign in with Gmail.</li>" +
-      "<li>If you see terms, click <strong>Agree</strong> or <strong>Continue</strong>.</li>" +
-      "<li>Click the blue button <strong>Create API key</strong>.</li>" +
-      "<li>If it asks for a project, click <strong>Create API key in new project</strong> (or pick any project and click <strong>Create</strong>).</li>" +
-      "<li>A long secret appears (it often starts with <strong>AIza</strong>). Click <strong>Copy</strong>.</li>" +
+      "<li>Sign in with Gmail.</li>" +
+      "<li>Click <strong>Create API key</strong>.</li>" +
+      "<li>If a list of projects appears, <strong>click an existing project</strong> — do not choose “new project”.</li>" +
+      "<li>Click <strong>Create</strong> / <strong>Copy</strong>.</li>" +
       "</ol>" +
-      "<p>Come back to the Makeo tab. Do not share this key with anyone.</p></div>" +
+      "<p><strong>Plan B — this usually works when Plan A fails</strong></p>" +
+      '<p class="click">1. Click <a href="https://console.cloud.google.com/projectcreate" target="_blank" rel="noopener"><strong>Create a Google project here</strong></a>.</p>' +
+      "<p>Type any name (example: Makeo). Click <strong>Create</strong>. Wait until the top bar shows that name.</p>" +
+      '<p class="click">2. Click <a href="https://console.cloud.google.com/apis/library/generativelanguage.googleapis.com" target="_blank" rel="noopener"><strong>Turn on the Gemini API here</strong></a>. Click <strong>Enable</strong>.</p>' +
+      '<p class="click">3. Click <a href="https://aistudio.google.com/apikey" target="_blank" rel="noopener"><strong>AI Studio keys again</strong></a>.</p>' +
+      "<ol>" +
+      "<li>If you see <strong>Import projects</strong> or <strong>Projects</strong>, import the project you just created.</li>" +
+      "<li>Click <strong>Create API key</strong>.</li>" +
+      "<li>Choose <strong>that existing project</strong> (the one named Makeo). Do not create a new project.</li>" +
+      "<li>Click <strong>Copy</strong> on the long secret (often starts with <strong>AIza</strong>).</li>" +
+      "</ol>" +
+      "<p>If Plan B still fails: turn off VPN, try a personal Gmail in a new Chrome window, and check <a href=\"https://myaccount.google.com/age-verification\" target=\"_blank\" rel=\"noopener\">Google age verification</a>.</p>" +
+      "<p>Come back to Makeo. Do not share this key.</p></div>" +
 
       '<div class="how-step"><h3><span class="n">4</span> Paste the key into Makeo</h3>' +
       "<p>You should be on the page <strong>Enter your Google Flow key</strong>. If not:</p>" +
@@ -459,14 +470,17 @@
       '<section class="panel"><h1>Enter your Google Flow key</h1>' +
       '<p>We need <strong>your</strong> key. Makeo does not give you one. Follow these clicks:</p>' +
       '<div class="how-step"><h3><span class="n">A</span> Get the key from Google</h3>' +
-      '<p class="click">Click <strong>Open Google to get my key</strong>. A new tab opens.</p>' +
-      '<p><a class="btn primary" href="https://aistudio.google.com/apikey" target="_blank" rel="noopener">Open Google to get my key</a></p>' +
+      '<p class="error">If Google says <strong>Failed to create project</strong>, do not keep retrying “new project”. Use Plan B.</p>' +
+      '<p><strong>Plan A</strong> — only if a project name is already listed:</p>' +
+      '<p><a class="btn primary" href="https://aistudio.google.com/apikey" target="_blank" rel="noopener">Open Google AI Studio keys</a></p>' +
+      "<ol><li>Create API key → pick an <strong>existing</strong> project → Copy.</li></ol>" +
+      '<p><strong>Plan B</strong> (when create-project fails):</p>' +
       "<ol>" +
-      "<li>Sign in with Gmail if Google asks.</li>" +
-      "<li>Click <strong>Create API key</strong>.</li>" +
-      "<li>Click <strong>Create API key in new project</strong> (or choose a project → <strong>Create</strong>).</li>" +
-      "<li>Click <strong>Copy</strong> next to the long secret (often starts with AIza).</li>" +
-      "</ol></div>" +
+      '<li><a href="https://console.cloud.google.com/projectcreate" target="_blank" rel="noopener">Create a Google project</a> named Makeo → <strong>Create</strong>.</li>' +
+      '<li><a href="https://console.cloud.google.com/apis/library/generativelanguage.googleapis.com" target="_blank" rel="noopener">Turn on Gemini API</a> → <strong>Enable</strong>.</li>' +
+      '<li>Back on <a href="https://aistudio.google.com/apikey" target="_blank" rel="noopener">AI Studio keys</a>: import that project if asked, then Create API key in <strong>that</strong> project (not a new one) → <strong>Copy</strong>.</li>' +
+      "</ol>" +
+      "<p>Use personal Gmail if a work email is blocked. Turn off VPN.</p></div>" +
       '<div class="how-step"><h3><span class="n">B</span> Paste it here</h3>' +
       '<p class="click">Click the box below. Paste. Click <strong>Save Google Flow key</strong>.</p></div>' +
       (has ? '<p class="ok">A key is saved (…' + esc(has.slice(-4)) + "). Paste a new one to replace it.</p>" : '<p class="error">No Google Flow key on this brand yet. Generate is blocked until you save one.</p>') +
