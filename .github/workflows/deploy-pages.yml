@@ -2,7 +2,7 @@ name: Deploy UI to GitHub Pages
 
 on:
   push:
-    branches: [main]
+    branches: [main, explore/fal-ai]
     paths:
       - "web/**"
       - ".github/workflows/deploy-pages.yml"
@@ -24,29 +24,74 @@ jobs:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout main (live site)
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          path: main-src
 
-      - name: Sanity-check static site
+      - name: Checkout fal preview branch
+        continue-on-error: true
+        uses: actions/checkout@v4
+        with:
+          ref: explore/fal-ai
+          path: fal-src
+
+      - name: Assemble live site + preview
         run: |
           set -euo pipefail
-          for f in web/index.html web/manifest.webmanifest web/assets/app.js web/assets/styles.css; do
-            test -f "$f" || { echo "::error::Missing $f"; exit 1; }
-          done
-          ls -la web web/assets
+          mkdir -p _site/preview
+          cp -a main-src/web/. _site/
+          touch _site/.nojekyll
+          cat > _site/preview/index.html <<'HTML'
+          <!DOCTYPE html>
+          <html lang="en">
+          <head>
+            <meta charset="UTF-8" />
+            <meta name="viewport" content="width=device-width, initial-scale=1" />
+            <title>Makeo previews</title>
+            <style>
+              body { font: 16px/1.5 system-ui, sans-serif; background: #111; color: #eee; margin: 2rem; }
+              a { color: #e8b84b; }
+              .card { border: 1px solid #333; border-radius: 12px; padding: 1rem 1.2rem; max-width: 36rem; }
+            </style>
+          </head>
+          <body>
+            <p>Makeo preview builds — not the live product.</p>
+            <div class="card">
+              <p><strong>fal.ai experiment</strong></p>
+              <p><a href="./fal/">Open preview/fal</a></p>
+              <p>Live site stays at <a href="../">tmai-tech.github.io/Makeo</a>.</p>
+            </div>
+          </body>
+          </html>
+          HTML
+          if [ -f fal-src/web/index.html ]; then
+            mkdir -p _site/preview/fal
+            cp -a fal-src/web/. _site/preview/fal/
+            echo "Assembled /preview/fal from explore/fal-ai"
+          else
+            echo "explore/fal-ai not on the remote yet; live site only"
+          fi
+          find _site -maxdepth 3 -type f | sort
 
       - uses: actions/configure-pages@v5
 
       - uses: actions/upload-pages-artifact@v3
         with:
-          path: web
+          path: _site
 
       - id: deployment
         uses: actions/deploy-pages@v4
 
-      - name: Print share URL
+      - name: Print share URLs
         run: |
-          echo "### Makeo web URL" >> "$GITHUB_STEP_SUMMARY"
-          echo "" >> "$GITHUB_STEP_SUMMARY"
-          echo "**https://tmai-tech.github.io/Makeo/**" >> "$GITHUB_STEP_SUMMARY"
-          echo "" >> "$GITHUB_STEP_SUMMARY"
-          echo "Deployed page_url: ${{ steps.deployment.outputs.page_url }}" >> "$GITHUB_STEP_SUMMARY"
+          {
+            echo "### Makeo URLs"
+            echo ""
+            echo "- Live (main): **https://tmai-tech.github.io/Makeo/**"
+            echo "- fal preview: **https://tmai-tech.github.io/Makeo/preview/fal/**"
+            echo "- Preview index: **https://tmai-tech.github.io/Makeo/preview/**"
+            echo ""
+            echo "Deployed page_url: ${{ steps.deployment.outputs.page_url }}"
+          } >> "$GITHUB_STEP_SUMMARY"
