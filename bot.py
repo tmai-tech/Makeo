@@ -1,38 +1,30 @@
-"""Discord bot: run the whole pipeline from chat, approve with a button.
+"""Makeo Discord bot: remote control over the job row. Never writes jobs.
 
     python bot.py
 
-Commands (slash commands, type / in any channel the bot can see):
-    /post              pick today's trend, generate, then ask for approval
-    /post prompt:...   generate from your own Veo prompt instead
-    /status            what the bot is doing, IG token lifetime
-
-Needs DISCORD_BOT_TOKEN and DISCORD_CHANNEL_ID in .env -- see .env.example.
-
-ponytail: replaces the cloudflared tunnel + local approval page entirely. The
-bot uploads the mp4 straight into the channel (plays inline) and puts real
-Approve/Reject buttons on it, so there is no public URL to die mid-wait -- which
-already lost one approval click to a 502.
-
-ponytail: one job at a time, guarded by a flag rather than a queue. This is a
-daily pipeline; two concurrent Veo renders would just burn credits twice.
+Buttons use custom_id=makeo:{job_id}:approve|reject. Clicks ACK first
+(Discord 3s deadline), then POST /internal/jobs/{id}/discord-approve.
+The bot does not call daily.py, does not watch .trigger, and does not
+use newest_video().
 """
 
-import asyncio
-import functools
-import json
+from __future__ import annotations
+
 import os
-import subprocess
 import sys
+import urllib.error
+import urllib.request
 from pathlib import Path
 
-import discord
-from discord import app_commands
+try:
+    import discord
+    from discord import app_commands
+except ImportError:  # parse_custom_id is unit-tested without discord.py
+    discord = None
+    app_commands = None
 
 HERE = Path(__file__).parent
-MAX_UPLOAD = 8 * 1024 * 1024  # Discord's limit for unboosted servers
-
-_busy = asyncio.Lock()
+API = os.environ.get("MAKEO_API", "http://127.0.0.1:8780")
 
 
 def load_env():
@@ -45,198 +37,97 @@ def load_env():
                 os.environ.setdefault(k.strip(), v.strip().strip("'\""))
 
 
-def sh(*cmd, timeout=1800):
-    """Run a pipeline step. Returns (ok, tail_of_output)."""
-    r = subprocess.run([sys.executable, *[str(c) for c in cmd]],
-                       cwd=str(HERE), capture_output=True, text=True,
-                       timeout=timeout, encoding="utf-8", errors="replace")
-    out = ((r.stdout or "") + (r.stderr or "")).strip()
-    return r.returncode == 0, out[-1500:]
+def parse_custom_id(cid: str) -> tuple[str, str] | None:
+    # makeo:{job_id}:approve|reject
+    parts = (cid or "").split(":")
+    if len(parts) != 3 or parts[0] != "makeo":
+        return None
+    if parts[2] not in ("approve", "reject"):
+        return None
+    return parts[1], parts[2]
 
 
-def newest_video(branded=True):
-    pat = "flow-*-branded.mp4" if branded else "flow-*.mp4"
-    vids = [p for p in (HERE / "out").glob(pat)
-            if branded or not p.stem.endswith("-branded")]
-    return max(vids, key=lambda p: p.stat().st_mtime) if vids else None
+def notify_api(job_id: str, decision: str) -> tuple[bool, str]:
+    url = f"{API}/internal/jobs/{job_id}/discord-approve"
+    req = urllib.request.Request(
+        url, data=b"{}", method="POST",
+        headers={
+            "Content-Type": "application/json",
+            "X-Makeo-Worker-Key": os.environ.get("MAKEO_WORKER_KEY", ""),
+            "X-Makeo-Decision": decision,
+        },
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=30) as r:
+            return True, r.read().decode()[:200]
+    except urllib.error.HTTPError as e:
+        return False, e.read().decode()[:200]
+    except Exception as e:
+        return False, str(e)
 
 
-class Approval(discord.ui.View):
-    """Approve/Reject buttons attached to the uploaded video."""
+if discord is not None:
+    class Bot(discord.Client):
+        def __init__(self):
+            super().__init__(intents=discord.Intents.default())
+            self.tree = app_commands.CommandTree(self)
 
-    # ponytail: timeout=None + custom_id on each button makes this a PERSISTENT
-    # view. Without it, restarting the bot orphans every button already sitting
-    # in the channel -- the click has no handler and Discord shows "This
-    # interaction failed". The bot restarts on its own (crash loop, logon), so
-    # non-persistent buttons are a guaranteed dead end.
-    def __init__(self, video: Path = None, meta: dict = None):
-        super().__init__(timeout=None)
-        self.video = video or newest_video()
-        self.meta = meta or {}
+        async def setup_hook(self):
+            await self.tree.sync()
 
-    @discord.ui.button(label="Approve & post", style=discord.ButtonStyle.success,
-                       emoji="\N{WHITE HEAVY CHECK MARK}", custom_id="buzzit:approve")
-    async def approve(self, itx: discord.Interaction, _b: discord.ui.Button):
-        # ponytail: ack within Discord's 3-second interaction deadline, THEN do
-        # the slow work. Publishing takes minutes (tunnel + Instagram fetching
-        # and transcoding the video), so replying after it finishes shows the
-        # user "This interaction failed" even when the post succeeds.
-        for c in self.children:
-            c.disabled = True
-        await itx.response.edit_message(view=self)
+        async def on_ready(self):
+            print(f"logged in as {self.user} -- Makeo buttons live", flush=True)
 
-        ch = itx.channel
-        await ch.send("Publishing to Instagram -- this takes a couple of minutes...")
+        async def on_interaction(self, itx: discord.Interaction):
+            if itx.type is not discord.InteractionType.component:
+                return
+            cid = itx.data.get("custom_id") if itx.data else None
+            parsed = parse_custom_id(cid or "")
+            if not parsed:
+                return
+            job_id, decision = parsed
+            await itx.response.defer()
+            ok, tail = await itx.client.loop.run_in_executor(
+                None, notify_api, job_id, decision)
+            ig = os.environ.get("IG_USERNAME") or "your brand"
+            if ok:
+                await itx.followup.send(
+                    f"{'Approved — publishing' if decision == 'approve' else 'Rejected'}"
+                    f" for @{ig}.")
+            else:
+                await itx.followup.send(f"API error:\n```\n{tail}\n```")
 
-        ok, out = await asyncio.to_thread(
-            functools.partial(sh, "post_instagram.py", "--video", self.video,
-                              "--serve", timeout=900))
-        if ok:
-            link = next((w for w in out.split() if "instagram.com" in w), "")
-            await ch.send(f"Posted to @buzzit_official. {link}".strip())
-        else:
-            await ch.send(f"Publish FAILED:\n```\n{out[-900:]}\n```")
-        self.stop()
+    bot = Bot()
 
-    @discord.ui.button(label="Reject", style=discord.ButtonStyle.secondary,
-                       emoji="\N{CROSS MARK}", custom_id="buzzit:reject")
-    async def reject(self, itx: discord.Interaction, _b: discord.ui.Button):
-        for c in self.children:
-            c.disabled = True
-        await itx.response.edit_message(view=self)
-        await itx.channel.send("Rejected. Nothing posted; the file stays in out/.")
-        self.stop()
+    @bot.tree.command(name="status", description="Makeo bot is up")
+    async def status(itx: discord.Interaction):
+        await itx.response.send_message(
+            "Makeo Discord is a remote control. Generate and approve in the app; "
+            "buttons here call the same job row.", ephemeral=True)
 
+    def approval_view(job_id: str) -> discord.ui.View:
+        view = discord.ui.View(timeout=None)
+        view.add_item(discord.ui.Button(
+            label="Approve & post", style=discord.ButtonStyle.success,
+            custom_id=f"makeo:{job_id}:approve"))
+        view.add_item(discord.ui.Button(
+            label="Reject", style=discord.ButtonStyle.secondary,
+            custom_id=f"makeo:{job_id}:reject"))
+        return view
+else:
+    bot = None
 
-async def generate_and_offer(dest, prompt=None, caption=None):
-    """Generate a video and post it with approval buttons.
-
-    `dest` is anything with .send() -- a TextChannel (scheduled run) or an
-    Interaction.followup (/post). Caller holds _busy.
-    """
-    cmd = ["daily.py", "--skip-approve"]
-    if prompt:
-        cmd += ["--prompt", prompt]
-        if caption:
-            cmd += ["--caption", caption]
-
-    ok, out = await asyncio.to_thread(functools.partial(sh, *cmd, timeout=2400))
-    if not ok:
-        await dest.send(f"Generation FAILED:\n```\n{out[-900:]}\n```")
-        return
-
-    video = newest_video()
-    if not video:
-        await dest.send("No video produced -- check the logs.")
-        return
-
-    sidecar = video.with_suffix(".json")
-    meta = json.loads(sidecar.read_text(encoding="utf-8")) if sidecar.exists() else {}
-    size = video.stat().st_size
-
-    body = (f"**{meta.get('topic', 'Video ready')}**\n"
-            f"{meta.get('caption', '')}\n\n"
-            f"Approve to post to @buzzit_official.")
-
-    if size <= MAX_UPLOAD:
-        await dest.send(body, file=discord.File(video), view=Approval(video, meta))
-    else:
-        # ponytail: too big to upload -- name the file rather than silently
-        # dropping the preview. Approval still works.
-        await dest.send(
-            f"{body}\n(video is {size/1e6:.1f}MB, over Discord's limit -- "
-            f"preview it at `out/{video.name}`)",
-            view=Approval(video, meta))
-
-
-class Bot(discord.Client):
-    def __init__(self):
-        # ponytail: default intents only. Slash commands and buttons need no
-        # privileged intents, so there is nothing to enable in the portal.
-        super().__init__(intents=discord.Intents.default())
-        self.tree = app_commands.CommandTree(self)
-
-    async def setup_hook(self):
-        # Re-register the persistent view so buttons from before a restart still
-        # work. Falls back to the newest video, which is what they referred to.
-        self.add_view(Approval())
-        await self.tree.sync()
-        self.loop.create_task(watch_trigger())
-
-    async def on_ready(self):
-        print(f"logged in as {self.user} -- /post is live", flush=True)
-
-
-TRIGGER = HERE / ".trigger"
-
-
-async def watch_trigger():
-    """Run the pipeline when Task Scheduler drops a .trigger file.
-
-    ponytail: a file, not an HTTP endpoint or a second Discord client. The
-    scheduler and the bot are on the same machine, so `New-Item .trigger` is the
-    whole IPC -- no port, no auth, nothing to leak. The bot already owns the
-    Discord connection; the scheduler just needs to say "go".
-    """
-    await bot.wait_until_ready()
-    while not bot.is_closed():
-        await asyncio.sleep(10)
-        if not TRIGGER.exists():
-            continue
-        try:
-            body = TRIGGER.read_text(encoding="utf-8").strip()
-        except OSError:
-            body = ""
-        TRIGGER.unlink(missing_ok=True)
-
-        ch = bot.get_channel(int(os.environ.get("DISCORD_CHANNEL_ID", 0) or 0))
-        if ch is None:
-            print("DISCORD_CHANNEL_ID unset or wrong -- scheduled run has nowhere "
-                  "to post", flush=True)
-            continue
-        if _busy.locked():
-            await ch.send("Scheduled run skipped -- already generating.")
-            continue
-        async with _busy:
-            await ch.send("Scheduled run: picking today's trend...")
-            await generate_and_offer(ch, prompt=body or None)
-
-
-bot = Bot()
-
-
-@bot.tree.command(name="post", description="Generate a Buzzit video and approve it")
-@app_commands.describe(
-    prompt="Your own Veo prompt (leave blank to use today's trending topic)",
-    caption="Instagram caption (only used with a custom prompt)")
-async def post(itx: discord.Interaction, prompt: str = None, caption: str = None):
-    if _busy.locked():
-        await itx.response.send_message("Already generating -- one at a time.",
-                                        ephemeral=True)
-        return
-
-    await itx.response.send_message(
-        "Using your prompt..." if prompt else "Picking today's trend...")
-
-    async with _busy:
-        await itx.followup.send("Generating the video -- a few minutes.")
-        await generate_and_offer(itx.followup, prompt=prompt, caption=caption)
-
-
-@bot.tree.command(name="status", description="Bot and Instagram token status")
-async def status(itx: discord.Interaction):
-    await itx.response.defer(thinking=True)
-    ok, out = await asyncio.to_thread(
-        functools.partial(sh, "post_instagram.py", "--whoami", timeout=120))
-    busy = "generating a video" if _busy.locked() else "idle"
-    await itx.followup.send(f"Bot is **{busy}**.\n```\n{out[-800:]}\n```")
+    def approval_view(job_id: str):
+        raise RuntimeError("discord.py is not installed")
 
 
 def main():
+    if discord is None:
+        sys.exit("discord.py is not installed")
     load_env()
     token = os.environ.get("DISCORD_BOT_TOKEN")
     if not token:
-        sys.exit("set DISCORD_BOT_TOKEN in .env (Developer Portal -> Bot -> Reset Token)")
+        sys.exit("set DISCORD_BOT_TOKEN in .env")
     bot.run(token)
 
 
