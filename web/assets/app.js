@@ -1,22 +1,48 @@
 (function () {
   var KEY = "makeo-demo-v2";
+  var PREV_KEYS = ["makeo-demo-v1"];
   var clips = {};
 
   function load() {
     try { return JSON.parse(localStorage.getItem(KEY) || "{}"); }
     catch (e) { return {}; }
   }
-  function save(s) { localStorage.setItem(KEY, JSON.stringify(s)); }
+  function save(s) {
+    try { localStorage.setItem(KEY, JSON.stringify(s)); }
+    catch (e) { s._saveError = e.message || "storage blocked"; }
+  }
+  function mergeUsers(into, from) {
+    var seen = {};
+    into.forEach(function (u) { seen[u.email] = true; });
+    (from || []).forEach(function (u) {
+      if (u && u.email && !seen[u.email]) {
+        into.push(u);
+        seen[u.email] = true;
+      }
+    });
+  }
   function state() {
     var s = load();
     s.users = s.users || [];
     s.brands = s.brands || [];
     s.jobs = s.jobs || [];
     s.session = s.session || null;
+    PREV_KEYS.forEach(function (k) {
+      try {
+        var old = JSON.parse(localStorage.getItem(k) || "{}");
+        mergeUsers(s.users, old.users);
+        (old.brands || []).forEach(function (b) {
+          if (b && b.id && !s.brands.some(function (x) { return x.id === b.id; })) s.brands.push(b);
+        });
+      } catch (e) {}
+    });
     return s;
   }
   function uid() { return Math.random().toString(36).slice(2, 10) + Date.now().toString(36); }
   function hash(str) {
+    if (!window.crypto || !crypto.subtle) {
+      return Promise.reject(new Error("This page must be opened on https://tmai-tech.github.io/Makeo/ (not a saved file)."));
+    }
     return crypto.subtle.digest("SHA-256", new TextEncoder().encode(str)).then(function (buf) {
       return Array.from(new Uint8Array(buf)).map(function (b) {
         return b.toString(16).padStart(2, "0");
@@ -240,7 +266,7 @@
       : 'New here? <a href="#/signup">Create an account</a>';
     return (
       '<section class="panel"><h1>' + title + "</h1>" +
-      '<p class="muted">Account stays in this browser. Google Flow / a real Instagram publish need the Makeo worker on your machine.</p>' +
+      '<p class="muted">Use <strong>Create account</strong> first on this same browser. Login only works for accounts created here — not email/password from Instagram or another device.</p>' +
       (err ? '<p class="error">' + esc(err) + "</p>" : "") +
       '<form id="authForm">' +
       '<label>Email</label><input name="email" type="email" required autocomplete="username"/>' +
@@ -387,9 +413,14 @@
       var pass = form.password.value;
       hash(pass).then(function (h) {
         var s = state();
+        if (s._saveError && kind === "signup") {
+          render(shell(s, authForm("signup", "Could not save the account in this browser (private/incognito often blocks it). Try a normal window."), { landing: true }));
+          bindAuth("signup");
+          return;
+        }
         if (kind === "signup") {
           if (s.users.some(function (u) { return u.email === email; })) {
-            render(shell(s, authForm("signup", "That email already has an account. Sign in."), { landing: true }));
+            render(shell(s, authForm("signup", "That email already has an account on this browser. Use Sign in."), { landing: true }));
             bindAuth("signup");
             return;
           }
@@ -397,11 +428,25 @@
           s.users.push(u);
           s.session = u.id;
           save(s);
+          if (s._saveError) {
+            render(shell(s, authForm("signup", "Account could not be stored: " + s._saveError), { landing: true }));
+            bindAuth("signup");
+            return;
+          }
           go("/home");
         } else {
+          var byEmail = s.users.filter(function (x) { return x.email === email; })[0];
           var found = s.users.filter(function (x) { return x.email === email && x.pass === h; })[0];
-          if (!found) {
-            render(shell(s, authForm("login", "Unknown email or password."), { landing: true }));
+          var msg;
+          if (!s.users.length) {
+            msg = "No account exists in this browser yet. Click Create account (login does not use a server).";
+          } else if (!byEmail) {
+            msg = "No account for " + email + " in this browser. Create account first, or use the same browser where you signed up.";
+          } else if (!found) {
+            msg = "Password does not match the account saved in this browser.";
+          }
+          if (msg) {
+            render(shell(s, authForm("login", msg), { landing: true }));
             bindAuth("login");
             return;
           }
@@ -409,6 +454,10 @@
           save(s);
           go("/home");
         }
+      }).catch(function (err) {
+        var s = state();
+        render(shell(s, authForm(kind, err.message || "Login failed."), { landing: true }));
+        bindAuth(kind);
       });
     });
   }
