@@ -17,7 +17,22 @@ as the product runner.
 
 The scripts still run the original **Buzzit** path with no flags. Buzzit is
 the reference tenant, not the product name. Brand-specific copy, assets, and
-tokens become `--config` in PRs 2–5.
+tokens become `--config`.
+
+## Jobs (Makeo worker)
+
+Clone this repo onto a machine that has Chrome (Windows first). Two processes,
+never `uvicorn --workers 2`, never GitHub Actions, never Task Scheduler as the
+only runner:
+
+```
+set MAKEO_MASTER_KEY=...          # Fernet key from cryptography.fernet.Fernet.generate_key()
+python -m makeo.enqueue --brand buzzit
+python worker.py                  # PR 6b
+```
+
+Each enqueue copies brand.json + assets into `data/tenants/<slug>/jobs/<id>/`.
+The worker must use only that prefix.
 
 `n8n-genz-daily.json` is an unsupported leftover (old n8n + Postiz path).
 Do not run it; do not build on it.

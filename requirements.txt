@@ -1,2 +1,3 @@
 playwright>=1.40
 discord.py>=2.4
+cryptography>=42
