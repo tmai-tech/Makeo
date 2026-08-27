@@ -193,6 +193,10 @@ def main():
             cmd += ["--screen", args.screen]
         if args.no_pip:
             cmd.append("--no-pip")
+        if args.config:
+            cmd += ["--config", args.config]
+        if out_dir:
+            cmd += ["--work-dir", out_dir]
         run(*cmd)
         branded = video.with_name(video.stem + "-branded.mp4")
         if branded.exists():

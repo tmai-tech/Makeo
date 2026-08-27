@@ -18,10 +18,14 @@ slides off it. The end-card brands every clip regardless of what Veo produced.
 
 import argparse
 import json
+import os
 import shutil
 import subprocess
 import sys
+import tempfile
 from pathlib import Path
+
+import brand_config as bc
 
 HERE = Path(__file__).parent
 SHOTS = HERE / "screenshot"
@@ -50,7 +54,7 @@ def probe(video, *entries):
     return out
 
 
-def build_endcard(png, w, h, out_png):
+def build_endcard(png, w, h, out_png, logo=None):
     """Screenshot centred on black with the logo above it, at video resolution.
 
     ponytail: crop each screenshot to its content first. The raw PNGs are tall
@@ -58,7 +62,7 @@ def build_endcard(png, w, h, out_png):
     blank below the last row); scaling them whole leaves the content stranded in
     the top third. Crop fractions are per-screen because the dead space differs.
     """
-    logo = SHOTS / "logo.png"
+    logo = Path(logo) if logo else (SHOTS / "logo.png")
     # (top_frac, height_frac) of the source to keep.
     CROP = {"withdraw": (0.07, 0.45), "feedscreen": (0.0, 1.0), "Profile": (0.0, 0.72)}
     top, keep = CROP.get(png.stem, (0.0, 1.0))
@@ -76,7 +80,7 @@ def build_endcard(png, w, h, out_png):
         check=True)
 
 
-def add_pip(video, w, h, start):
+def add_pip(video, w, h, start, pip_image=None, work_dir=None, border="0xE8B84B"):
     """Overlay the real Buzzit feed as a phone-shaped inset for the last seconds.
 
     ponytail: a fixed-position inset, NOT the screenshot warped onto the phone in
@@ -85,10 +89,11 @@ def add_pip(video, w, h, start):
     phone edge-on once, all from prompts that asked for the screen. An inset is
     deterministic: it lands correctly on every clip whatever Veo did.
     """
-    shot = SHOTS / "feedscreen.png"
+    shot = Path(pip_image) if pip_image else (SHOTS / "feedscreen.png")
     if not shot.exists():
         return video
-    out = HERE / "_withpip.mp4"
+    work = Path(work_dir) if work_dir else HERE
+    out = work / "_withpip.mp4"
     pw = int(w * 0.30)                     # inset ~30% of frame width
     # ponytail: top-RIGHT. Veo tends to put the talking head centre-left holding
     # a phone on the left, so a left inset stacks awkwardly above the real phone.
@@ -100,7 +105,7 @@ def add_pip(video, w, h, start):
     # timeline. A PNG is a single frame at t=0, so fade/enable never fire on it
     # and the overlay silently never appears -- which is exactly what happened.
     vf = (f"[1:v]scale={pw}:-1,"
-          f"pad=iw+8:ih+8:4:4:color=0xE8B84B,"
+          f"pad=iw+8:ih+8:4:4:color={border},"
           f"format=yuva420p,fade=t=in:st=0:d={fade}:alpha=1,"
           f"setpts=PTS-STARTPTS+{start}/TB[pip];"
           f"[0:v][pip]overlay={x}:{y}:enable='gte(t,{start})':eof_action=pass")
@@ -129,17 +134,62 @@ def main():
                     help="seconds into the clip to show the feed inset")
     ap.add_argument("--screen", choices=["withdraw", "feedscreen", "Profile"],
                     help="use a static screenshot instead of the animated splash")
-    ap.add_argument("--seconds", type=float, default=END_S)
+    ap.add_argument("--seconds", type=float, default=None)
+    ap.add_argument("--config", type=Path)
+    ap.add_argument("--assets-dir", type=Path)
+    ap.add_argument("--logo", type=Path)
+    ap.add_argument("--splash", type=Path)
+    ap.add_argument("--pip-image", type=Path)
+    ap.add_argument("--pip-color", default=None)
+    ap.add_argument("--work-dir", type=Path, help="temp files; default video dir or tempfile")
     args = ap.parse_args()
 
     if not args.video.exists():
         sys.exit(f"no such video: {args.video}")
 
+    cfg = bc.load(args.config) if args.config else None
+    repo = HERE
+    assets_dir = args.assets_dir
+    if cfg and not assets_dir and cfg.assets_dir:
+        assets_dir = Path(cfg.assets_dir)
+
+    def _asset(flag, rel):
+        if flag:
+            return Path(flag)
+        if assets_dir and rel:
+            p = assets_dir / Path(rel).name
+            if p.exists():
+                return p
+        if rel:
+            p = repo / rel
+            if p.exists():
+                return p
+        return None
+
+    logo = _asset(args.logo, cfg.assets.logo if cfg else "screenshot/logo.png")
+    splash = _asset(args.splash, cfg.assets.splash if cfg else "screenshot/splash_video.gif")
+    pip_image = _asset(args.pip_image, cfg.assets.pip_image if cfg else "screenshot/feedscreen.png")
+    border = args.pip_color or (cfg.pip_border_color if cfg else "0xE8B84B")
+    seconds = args.seconds if args.seconds is not None else (
+        cfg.endcard_seconds if cfg else END_S)
+    pip_from = args.pip_from if args.pip_from != 4.0 else (
+        cfg.pip_from_s if cfg else 4.0)
+    no_pip = args.no_pip or (cfg and not cfg.pip_enabled)
+
     w, h = probe(args.video, "width", "height")
     print(f"video is {w}x{h}", flush=True)
 
-    tmp = HERE / "_endcard.png"
-    card = HERE / "_endcard.mp4"
+    scratch = None
+    if args.work_dir:
+        work = args.work_dir
+        work.mkdir(parents=True, exist_ok=True)
+    elif os.environ.get("MAKEO_JOB_ID") or args.config:
+        work = args.video.parent
+    else:
+        scratch = tempfile.mkdtemp(prefix="makeo-brand-")
+        work = Path(scratch)
+    tmp = work / "_endcard.png"
+    card = work / "_endcard.mp4"
     out = args.video.with_name(args.video.stem + "-branded.mp4")
 
     try:
@@ -147,15 +197,16 @@ def main():
             png = SHOTS / f"{args.screen}.png"
             if not png.exists():
                 sys.exit(f"missing {png}")
-            build_endcard(png, int(w), int(h), tmp)
+            build_endcard(png, int(w), int(h), tmp, logo=logo)
             src = ["-loop", "1", "-i", str(tmp)]
             vf = []
         else:
-            if not SPLASH.exists():
-                sys.exit(f"missing {SPLASH}")
+            splash_path = splash or SPLASH
+            if not splash_path.exists():
+                sys.exit(f"missing {splash_path}")
             # ponytail: the gif is 270x480 -- same 9:16 ratio, so a straight
             # lanczos upscale to the video size is enough; no pad/crop needed.
-            src = ["-i", str(SPLASH)]
+            src = ["-i", str(splash_path)]
             vf = ["-vf", f"scale={w}:{h}:flags=lanczos,fps=30"]
 
         # ponytail: match the SOURCE's sample rate, and normalise both inputs
@@ -167,14 +218,15 @@ def main():
         subprocess.run(
             ["ffmpeg", "-v", "error", "-y", *src,
              "-f", "lavfi", "-i", f"anullsrc=channel_layout=stereo:sample_rate={sr}",
-             "-t", str(args.seconds), *vf, "-c:v", "libx264", "-preset", "medium",
+             "-t", str(seconds), *vf, "-c:v", "libx264", "-preset", "medium",
              "-pix_fmt", "yuv420p", "-r", "30",
              "-c:a", "aac", "-b:a", "128k", "-ar", sr, "-ac", "2", "-shortest",
              str(card)], check=True)
 
         main = str(args.video)
-        if not args.no_pip:
-            main = str(add_pip(args.video, int(w), int(h), args.pip_from))
+        if not no_pip:
+            main = str(add_pip(args.video, int(w), int(h), pip_from,
+                               pip_image=pip_image, work_dir=work, border=border))
 
         # ponytail: re-encode concat, not stream copy. The source and the card
         # differ in timebase/SAR and the copy demuxer produces a broken file.
@@ -214,7 +266,9 @@ def main():
     finally:
         tmp.unlink(missing_ok=True)
         card.unlink(missing_ok=True)
-        (HERE / "_withpip.mp4").unlink(missing_ok=True)
+        (work / "_withpip.mp4").unlink(missing_ok=True)
+        if scratch:
+            shutil.rmtree(scratch, ignore_errors=True)
 
     sidecar = args.video.with_suffix(".json")
     if sidecar.exists():

@@ -226,7 +226,32 @@ Token expires in ~60 days -- rerun step 5 to refresh.
 """
 
 
-DEFAULT_IG_ID = "17841441421691063"  # @buzzit_official, from the consent screen
+def job_scoped(args=None):
+    """True when this process must not read repo .env (Makeo worker path)."""
+    if os.environ.get("MAKEO_JOB_ID"):
+        return True
+    if args is not None and getattr(args, "config", None):
+        return True
+    return False
+
+
+def exchange_token(short_token, app_id, app_secret):
+    """Exchange a short-lived token. Returns the long-lived token string."""
+    return api("oauth/access_token", {
+        "grant_type": "fb_exchange_token",
+        "client_id": app_id,
+        "client_secret": app_secret,
+        "fb_exchange_token": short_token,
+    })["access_token"]
+
+
+def probe_ig(ig_id, token):
+    """Return {id, username, ...} or {} if the id is not readable with token."""
+    try:
+        return api(ig_id, {"fields": "username,name,followers_count,media_count",
+                           "access_token": token})
+    except SystemExit:
+        return {}
 
 
 def write_env(ig_id, token, long_lived=True):
@@ -251,24 +276,16 @@ def finish_setup(short_token, app_id, app_secret):
     copying ids back out, which is where this setup usually goes wrong.
     """
     print("exchanging for a long-lived token...", flush=True)
-    long_tok = api("oauth/access_token", {
-        "grant_type": "fb_exchange_token",
-        "client_id": app_id,
-        "client_secret": app_secret,
-        "fb_exchange_token": short_token,
-    })["access_token"]
+    long_tok = exchange_token(short_token, app_id, app_secret)
 
     # ponytail: if the IG id is already known, verify it directly and skip the
     # Page walk entirely. me/accounts only lists Pages where the user holds a
     # DIRECT Page role -- a user assigned at the Business level (ads, Business
-    # Suite) gets an empty list while still being able to publish. Verified: an
-    # empty me/accounts token read @buzzit_official and its /media edge fine.
-    known = os.environ.get("IG_USER_ID") or DEFAULT_IG_ID
+    # Suite) gets an empty list while still being able to publish.
+    # DEFAULT_IG_ID (@buzzit_official) is gone -- never fall back to Buzzit.
+    known = os.environ.get("IG_USER_ID")
     if known:
-        try:  # probe only -- fall through to the Page walk if it fails
-            me = api(known, {"fields": "username", "access_token": long_tok})
-        except SystemExit:
-            me = {}
+        me = probe_ig(known, long_tok)
         if me.get("username"):
             print(f"verified @{me['username']} directly -- skipped Page lookup")
             write_env(known, long_tok)
@@ -304,16 +321,17 @@ def finish_setup(short_token, app_id, app_secret):
     for i, (pname, iid, uname) in enumerate(found, 1):
         print(f"  {i}. @{uname}  (id {iid}, via Page '{pname}')")
 
-    want = os.environ.get("IG_USERNAME", "buzzit_official").lower()
+    want = (os.environ.get("IG_USERNAME") or "").lower()
     match = [f for f in found if f[2].lower() == want]
     if match:
         pname, ig_id, uname = match[0]
         print(f"\nselected @{uname} (matches IG_USERNAME={want})")
-    elif len(found) == 1:
+    elif not want and len(found) == 1:
         pname, ig_id, uname = found[0]
         print(f"\nselected @{uname} (only option)")
     else:
-        choice = input(f"\n@{want} not found. Enter the number to use: ").strip()
+        label = f"@{want} not found. " if want else ""
+        choice = input(f"\n{label}Enter the number to use: ").strip()
         try:
             pname, ig_id, uname = found[int(choice) - 1]
         except (ValueError, IndexError):
@@ -323,11 +341,12 @@ def finish_setup(short_token, app_id, app_secret):
     write_env(ig_id, long_tok)
 
 
-def whoami():
-    load_env()
+def whoami(skip_dotenv=False):
+    if not skip_dotenv:
+        load_env()
     ig, tok = os.environ.get("IG_USER_ID"), os.environ.get("IG_ACCESS_TOKEN")
     if not ig or not tok:
-        sys.exit("no credentials in .env yet")
+        sys.exit("no IG_USER_ID / IG_ACCESS_TOKEN in environment")
     me = api(ig, {"fields": "username,name,followers_count,media_count",
                   "access_token": tok})
     print(f"authenticated as @{me.get('username')} ({me.get('name', '')})")
@@ -359,19 +378,30 @@ def main():
     ap.add_argument("--whoami", action="store_true",
                     help="check which IG account the saved token controls")
     ap.add_argument("--save-token", metavar="TOKEN",
-                    help="verify a token against buzzit_official and write .env "
-                         "as-is (no long-lived exchange; use --finish-setup for that)")
+                    help="verify a token against IG_USER_ID in the environment "
+                         "and write .env (no Buzzit default; use --finish-setup "
+                         "for a long-lived exchange)")
+    ap.add_argument("--config", type=Path,
+                    help="BrandConfig path; with MAKEO_JOB_ID, skip repo .env")
     args = ap.parse_args()
+
+    scoped = job_scoped(args)
 
     if args.setup:
         print(SETUP)
         return
     if args.finish_setup:
+        if scoped:
+            sys.exit("finish-setup writes .env -- not allowed on the job-scoped path")
         finish_setup(*args.finish_setup)
         return
     if args.save_token:
+        if scoped:
+            sys.exit("save-token writes .env -- not allowed on the job-scoped path")
         tok = args.save_token.strip()
-        ig = os.environ.get("IG_USER_ID") or DEFAULT_IG_ID
+        ig = os.environ.get("IG_USER_ID")
+        if not ig:
+            sys.exit("set IG_USER_ID in the environment -- no Buzzit default")
         me = api(ig, {"fields": "username", "access_token": tok})
         print(f"verified @{me['username']}")
         write_env(ig, tok, long_lived=False)
@@ -379,14 +409,15 @@ def main():
               "Run --finish-setup with your App ID + Secret for a 60-day one.")
         return
     if args.whoami:
-        whoami()
+        whoami(skip_dotenv=scoped)
         return
 
-    load_env()
+    if not scoped:
+        load_env()
     ig_user, token = os.environ.get("IG_USER_ID"), os.environ.get("IG_ACCESS_TOKEN")
     if not ig_user or not token:
-        sys.exit("set IG_USER_ID and IG_ACCESS_TOKEN in .env "
-                 "(run: python post_instagram.py --setup)")
+        sys.exit("missing IG_USER_ID / IG_ACCESS_TOKEN in environment "
+                 "(job-scoped runs must not fall back to repo .env)")
 
     caption = args.caption
     if not caption:
