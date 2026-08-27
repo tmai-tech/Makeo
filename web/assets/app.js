@@ -83,6 +83,41 @@
   function flowKeyOf(b) {
     return ((b && (b.flowKey || b.geminiKey)) || "").trim();
   }
+  function falKeyOf(b) {
+    return ((b && b.falKey) || "").trim();
+  }
+  function hasVideoKey(b) {
+    return !!(falKeyOf(b) || flowKeyOf(b));
+  }
+  function falModels() {
+    return {
+      "ltx-fast": {
+        id: "fal-ai/ltx-2.3/text-to-video/fast",
+        label: "LTX 2.3 Fast (cheap, ~$0.25 for 6s)",
+        input: function (prompt) {
+          return {
+            prompt: prompt,
+            duration: 6,
+            resolution: "1080p",
+            aspect_ratio: "9:16",
+            generate_audio: true
+          };
+        }
+      },
+      "veo": {
+        id: "fal-ai/veo3.1",
+        label: "Veo 3.1 on fal (closer to Flow, costs more)",
+        input: function (prompt) {
+          return {
+            prompt: prompt,
+            aspect_ratio: "9:16",
+            duration: "8s",
+            generate_audio: true
+          };
+        }
+      }
+    };
+  }
   function advanceJobs(s) {
     var now = Date.now();
     s.jobs.forEach(function (j) {
@@ -117,8 +152,8 @@
   function missingForVideo(brand, mode, prompt) {
     var miss = [];
     if (!brand || !brand.name) miss.push("a brand name");
-    if (!flowKeyOf(brand)) {
-      miss.push("your Google Flow key (Brand → Google Flow key). Create one at aistudio.google.com/apikey and paste it — Generate will not run without it.");
+    if (!hasVideoKey(brand)) {
+      miss.push("a fal.ai key or a Google Flow key (Brand → Keys). Generate will not run without one of them.");
     }
     if (mode === "custom") {
       if (!(prompt || "").trim()) miss.push("your own video prompt");
@@ -189,6 +224,84 @@
               return v.blob();
             }).then(function (blob) {
               return URL.createObjectURL(blob);
+            });
+          });
+        });
+      }
+      return poll();
+    });
+  }
+  function falError(data, status) {
+    var detail = "";
+    if (data) {
+      if (typeof data.detail === "string") detail = data.detail;
+      else if (data.detail && data.detail.msg) detail = data.detail.msg;
+      else if (Array.isArray(data.detail) && data.detail[0]) {
+        detail = data.detail[0].msg || JSON.stringify(data.detail[0]);
+      } else if (data.error) detail = typeof data.error === "string" ? data.error : (data.error.message || "");
+      else if (data.message) detail = data.message;
+    }
+    if (status === 401) return detail || "fal.ai rejected this key (401). Copy a new key from fal.ai/dashboard/keys.";
+    if (status === 402 || status === 403) return detail || "fal.ai has no usable credit on this key. Check billing at fal.ai/dashboard.";
+    if (status === 429) return detail || "fal.ai rate-limited this key. Wait and try again.";
+    return detail || ("fal.ai failed (HTTP " + status + ").");
+  }
+  function falVideoUrl(data) {
+    if (!data) return "";
+    if (data.video && data.video.url) return data.video.url;
+    if (data.video && typeof data.video === "string") return data.video;
+    if (data.video_url) return data.video_url;
+    var list = data.videos || data.output || [];
+    if (list[0] && list[0].url) return list[0].url;
+    return "";
+  }
+  function generateFal(key, prompt, modelKey, onTick) {
+    var models = falModels();
+    var spec = models[modelKey] || models["ltx-fast"];
+    var headers = { "Content-Type": "application/json", Authorization: "Key " + key };
+    var endpoint = spec.id;
+    return fetch("https://queue.fal.run/" + endpoint, {
+      method: "POST",
+      headers: headers,
+      body: JSON.stringify(spec.input(prompt))
+    }).then(function (res) {
+      return res.json().then(function (data) {
+        if (!res.ok) throw new Error(falError(data, res.status));
+        if (!data.request_id && !data.status_url) {
+          throw new Error("fal.ai did not start a job. " + JSON.stringify(data).slice(0, 240));
+        }
+        return {
+          statusUrl: data.status_url || ("https://queue.fal.run/" + endpoint + "/requests/" + data.request_id + "/status"),
+          resultUrl: data.response_url || ("https://queue.fal.run/" + endpoint + "/requests/" + data.request_id)
+        };
+      });
+    }).then(function (urls) {
+      var tries = 0;
+      function poll() {
+        tries += 1;
+        if (onTick) onTick("Waiting on fal.ai (" + spec.label + ")… " + tries * 5 + "s");
+        return fetch(urls.statusUrl + (urls.statusUrl.indexOf("?") >= 0 ? "&" : "?") + "logs=1", { headers: headers }).then(function (res) {
+          return res.json().then(function (data) {
+            if (!res.ok) throw new Error(falError(data, res.status));
+            var st = data.status || "";
+            if (st === "IN_QUEUE" && onTick) onTick("fal.ai queue position " + (data.queue_position == null ? "?" : data.queue_position));
+            if (st !== "COMPLETED") {
+              if (tries > 48) throw new Error("fal.ai did not finish in 4 minutes. Check credit and try again.");
+              return new Promise(function (r) { setTimeout(r, 5000); }).then(poll);
+            }
+            if (data.error) throw new Error(data.error);
+            return fetch(urls.resultUrl, { headers: headers }).then(function (r2) {
+              return r2.json().then(function (out) {
+                if (!r2.ok) throw new Error(falError(out, r2.status));
+                var href = falVideoUrl(out);
+                if (!href) throw new Error("fal.ai finished but returned no video. " + JSON.stringify(out).slice(0, 300));
+                return fetch(href).then(function (v) {
+                  if (!v.ok) throw new Error("Could not download the fal.ai file (HTTP " + v.status + ").");
+                  return v.blob();
+                }).then(function (blob) {
+                  return URL.createObjectURL(blob);
+                });
+              });
             });
           });
         });
@@ -348,9 +461,15 @@
 
       '<div class="how-step"><h3><span class="n">2</span> Add your brand name</h3>' +
       "<p>After you are in, you will see “Your brands”.</p>" +
-      '<p class="click">Click <strong>New brand</strong>. In <strong>Name</strong> type your shop or brand (example: Makers Nook). You can leave the other boxes empty. Click <strong>Save and enter Flow key</strong>.</p></div>' +
+      '<p class="click">Click <strong>New brand</strong>. In <strong>Name</strong> type your shop or brand (example: Makers Nook). You can leave the other boxes empty. Click <strong>Save and enter keys</strong>.</p></div>' +
 
-      '<div class="how-step"><h3><span class="n">3</span> Get a Google Flow key (skip the button that fails)</h3>' +
+      '<div class="how-step"><h3><span class="n">3</span> Get a fal.ai key (this branch)</h3>' +
+      "<p>On this experiment branch you can make a video with fal.ai signup credit instead of Google.</p>" +
+      '<p class="click">Click <a href="https://fal.ai/dashboard/keys" target="_blank" rel="noopener"><strong>Open fal.ai keys</strong></a>. Sign in. Click <strong>Create Key</strong>. Copy it.</p>' +
+      '<p class="click">In Makeo: Home → your brand → <strong>Keys</strong>. Paste into <strong>fal.ai API key</strong>. Click <strong>Save keys</strong>.</p>' +
+      "<p>Then skip to step 5 and generate. Use the LTX Fast model first so one free credit is enough.</p></div>" +
+
+      '<div class="how-step"><h3><span class="n">3b</span> Get a Google Flow key (optional)</h3>' +
       "<p>Google makes the video. You must bring your own key. Use a <strong>personal Gmail</strong> (not a work/school email if you can). Keep the Makeo tab open.</p>" +
       '<p class="error">If you see <strong>Failed to create project</strong>, do <em>not</em> click “Create API key in new project” again. That Google page is broken for many people. Use Plan B below.</p>' +
       "<p><strong>Plan A — only if Google already shows a project name</strong></p>" +
@@ -376,9 +495,9 @@
       "<p>Come back to Makeo. Do not share this key.</p></div>" +
 
       '<div class="how-step"><h3><span class="n">4</span> Paste the key into Makeo</h3>' +
-      "<p>You should be on the page <strong>Enter your Google Flow key</strong>. If not:</p>" +
-      '<p class="click">Click <strong>Home</strong> → your brand name → <strong>Flow key</strong>.</p>' +
-      '<p class="click">Click inside the box <strong>Google Flow key</strong>. Paste (<strong>Ctrl+V</strong> on Windows, <strong>Cmd+V</strong> on Mac). Click <strong>Save Google Flow key</strong>.</p>' +
+      "<p>You should be on the page <strong>Video keys</strong>. If not:</p>" +
+      '<p class="click">Click <strong>Home</strong> → your brand name → <strong>Keys</strong>.</p>' +
+      '<p class="click">Paste the fal.ai key (or the Google key) and click <strong>Save keys</strong>.</p>' +
       "<p>You should see a green line: key saved.</p></div>" +
 
       '<div class="how-step"><h3><span class="n">5</span> Make a video</h3>' +
@@ -421,7 +540,7 @@
       ? brands.map(function (b) {
           return '<div class="card"><a href="#/brands/' + b.id + '"><strong>' + esc(b.name) +
             "</strong></a><div class=\"muted\">" + esc(b.slug) + "</div>" +
-            '<div class="row"><a href="#/brands/' + b.id + '/keys">Flow key</a>' +
+            '<div class="row"><a href="#/brands/' + b.id + '/keys">Keys</a>' +
             ' · <a href="#/brands/' + b.id + '/compose">Generate</a>' +
             ' · <a href="#/brands/' + b.id + '/inbox">Inbox</a>' +
             ' · <a href="#/brands/' + b.id + '/instagram">Instagram</a></div>' +
@@ -430,7 +549,7 @@
         }).join("")
       : '<p class="muted">No brands yet. Create one to start.</p>';
     return (
-      '<div class="banner">Stuck? Open the <a href="#/help">easy tutorial</a>. You must add a <strong>Google Flow key</strong> before a video can be made.</div>' +
+      '<div class="banner">Stuck? Open the <a href="#/help">easy tutorial</a>. Add a <strong>fal.ai key</strong> (this branch) or a Google Flow key before a video can be made.</div>' +
       "<h1>Your brands</h1>" + cards +
       '<div class="actions"><a class="btn primary" href="#/brands/new">New brand</a> <a class="btn ghost" href="#/help">Show me every click</a></div>'
     );
@@ -440,7 +559,7 @@
     b = b || {};
     return (
       '<section class="panel"><h1>' + (b.id ? "Edit " + esc(b.name) : "New brand") + "</h1>" +
-      '<p class="muted">Name is required. You will be asked for your Google Flow key next — Generate will not run without it.</p>' +
+      '<p class="muted">Name is required. Next you will add a fal.ai key or a Google Flow key — Generate will not run without one.</p>' +
       (err ? '<p class="error">' + esc(err) + "</p>" : "") +
       '<form id="brandForm">' +
       '<label>Name</label><input name="name" required value="' + esc(b.name || "") + '"/>' +
@@ -452,47 +571,53 @@
       '<label>Logo (optional)</label><input name="logo" type="file" accept="image/*"/>' +
       (b.logo ? '<p><img class="logo-preview" src="' + b.logo + '" alt="logo"/></p>' : "") +
       '<label>Splash / end-card (optional)</label><input name="splash" type="file" accept="image/*,.gif"/>' +
-      '<div class="row"><button class="btn primary" type="submit">Save and enter Flow key</button></div></form>' +
+      '<div class="row"><button class="btn primary" type="submit">Save and enter keys</button></div></form>' +
       (b.id
         ? '<div class="row"><button type="button" class="btn no deleteBrand" data-id="' + b.id +
           '" data-name="' + esc(b.name) + '">Delete this brand</button></div>'
         : "") +
       (b.id
-        ? '<p><a href="#/brands/' + b.id + '/keys">Google Flow key</a> · <a href="#/brands/' + b.id + '/compose">Generate</a> · <a href="#/brands/' + b.id + '/inbox">Inbox</a></p>'
+        ? '<p><a href="#/brands/' + b.id + '/keys">Keys</a> · <a href="#/brands/' + b.id + '/compose">Generate</a> · <a href="#/brands/' + b.id + '/inbox">Inbox</a></p>'
         : "") +
       "</section>"
     );
   }
 
   function keysForm(b, err, ok) {
-    var has = flowKeyOf(b);
+    var hasFal = falKeyOf(b);
+    var hasFlow = flowKeyOf(b);
     return (
-      '<section class="panel"><h1>Enter your Google Flow key</h1>' +
-      '<p>We need <strong>your</strong> key. Makeo does not give you one. Follow these clicks:</p>' +
-      '<div class="how-step"><h3><span class="n">A</span> Get the key from Google</h3>' +
-      '<p class="error">If Google says <strong>Failed to create project</strong>, do not keep retrying “new project”. Use Plan B.</p>' +
-      '<p><strong>Plan A</strong> — only if a project name is already listed:</p>' +
-      '<p><a class="btn primary" href="https://aistudio.google.com/apikey" target="_blank" rel="noopener">Open Google AI Studio keys</a></p>' +
-      "<ol><li>Create API key → pick an <strong>existing</strong> project → Copy.</li></ol>" +
-      '<p><strong>Plan B</strong> (when create-project fails):</p>' +
-      "<ol>" +
-      '<li><a href="https://console.cloud.google.com/projectcreate" target="_blank" rel="noopener">Create a Google project</a> named Makeo → <strong>Create</strong>.</li>' +
-      '<li><a href="https://console.cloud.google.com/apis/library/generativelanguage.googleapis.com" target="_blank" rel="noopener">Turn on Gemini API</a> → <strong>Enable</strong>.</li>' +
-      '<li>Back on <a href="https://aistudio.google.com/apikey" target="_blank" rel="noopener">AI Studio keys</a>: import that project if asked, then Create API key in <strong>that</strong> project (not a new one) → <strong>Copy</strong>.</li>' +
-      "</ol>" +
-      "<p>Use personal Gmail if a work email is blocked. Turn off VPN.</p></div>" +
-      '<div class="how-step"><h3><span class="n">B</span> Paste it here</h3>' +
-      '<p class="click">Click the box below. Paste. Click <strong>Save Google Flow key</strong>.</p></div>' +
-      (has ? '<p class="ok">A key is saved (…' + esc(has.slice(-4)) + "). Paste a new one to replace it.</p>" : '<p class="error">No Google Flow key on this brand yet. Generate is blocked until you save one.</p>') +
+      '<section class="panel"><h1>Video keys</h1>' +
+      '<p>This branch can generate with <strong>fal.ai</strong> (new) or the existing Google Flow / Veo key. Makeo does not give you a key.</p>' +
+
+      '<div class="how-step"><h3><span class="n">1</span> fal.ai key (try this first on this branch)</h3>' +
+      '<p class="click">1. Open <a href="https://fal.ai/dashboard/keys" target="_blank" rel="noopener"><strong>fal.ai/dashboard/keys</strong></a> and sign in with Google or GitHub.</p>' +
+      "<p>New accounts usually get a small signup credit. That is enough for one short LTX clip.</p>" +
+      '<p class="click">2. Click <strong>Create Key</strong> → copy it → paste below → Save keys.</p>' +
+      (hasFal
+        ? '<p class="ok">fal.ai key on file (…' + esc(hasFal.slice(-4)) + ").</p>"
+        : '<p class="muted">No fal.ai key yet.</p>') +
+      "</div>" +
+
+      '<div class="how-step"><h3><span class="n">2</span> Google Flow key (optional backup)</h3>' +
+      '<p>Only needed if you want Veo through Google instead of fal. If Google says <strong>Failed to create project</strong>, use Plan B on the <a href="#/help">tutorial</a>.</p>' +
+      (hasFlow
+        ? '<p class="ok">Google Flow key on file (…' + esc(hasFlow.slice(-4)) + ").</p>"
+        : '<p class="muted">No Google Flow key yet.</p>') +
+      "</div>" +
+
+      (!hasVideoKey(b) ? '<p class="error">Save at least one key. Generate is blocked until you do.</p>' : "") +
       (err ? '<p class="error">' + esc(err) + "</p>" : "") +
       (ok ? '<p class="ok">' + esc(ok) + "</p>" : "") +
       '<form id="keysForm">' +
+      '<label>fal.ai API key</label>' +
+      '<input name="falKey" type="password" autocomplete="off" placeholder="Paste your fal.ai key"/>' +
       '<label>Google Flow key</label>' +
-      '<input name="flowKey" type="password" autocomplete="off" placeholder="Paste your Google Flow key" ' + (has ? "" : "required") + "/>" +
+      '<input name="flowKey" type="password" autocomplete="off" placeholder="Paste your Google Flow key (optional)"/>' +
       '<label>Flow project URL (optional)</label>' +
       '<input name="flowProjectUrl" value="' + esc(b.flowProjectUrl || "") + '" placeholder="https://labs.google/fx/tools/flow/project/…"/>' +
-      '<div class="row"><button class="btn primary" type="submit">Save Google Flow key</button>' +
-      (has ? '<a class="btn ghost" href="#/brands/' + b.id + '/compose">Generate video</a>' : "") +
+      '<div class="row"><button class="btn primary" type="submit">Save keys</button>' +
+      (hasVideoKey(b) ? '<a class="btn ghost" href="#/brands/' + b.id + '/compose">Generate video</a>' : "") +
       "</div></form></section>"
     );
   }
@@ -514,17 +639,38 @@
   }
 
   function compose(b, err) {
+    var hasFal = falKeyOf(b);
+    var hasFlow = flowKeyOf(b);
+    var engineOpts = "";
+    if (hasFal) engineOpts += '<option value="fal">fal.ai</option>';
+    if (hasFlow) engineOpts += '<option value="veo">Google Veo 3.1</option>';
+    var modelOpts = Object.keys(falModels()).map(function (k) {
+      return '<option value="' + k + '">' + esc(falModels()[k].label) + "</option>";
+    }).join("");
     return (
       '<section class="panel"><h1>Generate for ' + esc(b.name) + "</h1>" +
-      '<p class="muted">This calls <strong>Veo 3.1</strong> with the Gemini key saved on the brand. Google Flow’s website is not opened from here. Without a key or a prompt, nothing is generated and the missing items are listed.</p>' +
-      (flowKeyOf(b)
-        ? '<p class="ok">Google Flow key on file (…' + esc(flowKeyOf(b).slice(-4)) + ').</p>'
-        : '<p class="error">No Google Flow key. <a href="#/brands/' + b.id + '/keys">Enter your Google Flow key</a> before generating.</p>') +
+      '<p class="muted">This branch can call <strong>fal.ai</strong> or Google Veo. Without a key or a prompt, nothing is generated and the missing items are listed.</p>' +
+      (hasFal
+        ? '<p class="ok">fal.ai key on file (…' + esc(hasFal.slice(-4)) + ").</p>"
+        : '<p class="muted">No fal.ai key. <a href="#/brands/' + b.id + '/keys">Add one</a> to try the free-credit path.</p>') +
+      (hasFlow
+        ? '<p class="ok">Google Flow key on file (…' + esc(flowKeyOf(b).slice(-4)) + ").</p>"
+        : "") +
+      (!hasVideoKey(b)
+        ? '<p class="error">No video key. <a href="#/brands/' + b.id + '/keys">Enter a fal.ai or Google Flow key</a> before generating.</p>'
+        : "") +
       (err ? '<p class="error">' + err + "</p>" : "") +
-      '<form id="composeForm"><label>Mode</label><select name="mode" id="mode">' +
+      '<form id="composeForm">' +
+      (engineOpts
+        ? '<label>Engine</label><select name="engine" id="engine">' + engineOpts + "</select>"
+        : "") +
+      (hasFal
+        ? '<label>fal model</label><select name="falModel" id="falModel">' + modelOpts + "</select>"
+        : "") +
+      '<label>Mode</label><select name="mode" id="mode">' +
       '<option value="custom">My own prompt</option>' +
       '<option value="trend">Topic from this brand’s pitch</option></select>' +
-      '<label>Video prompt</label><textarea name="prompt" id="prompt" rows="4" placeholder="Describe the 8-second scene for ' + esc(b.name) + '…"></textarea>' +
+      '<label>Video prompt</label><textarea name="prompt" id="prompt" rows="4" placeholder="Describe the scene for ' + esc(b.name) + '…"></textarea>' +
       '<label>Caption (optional)</label><input name="caption" placeholder="' + esc(b.name) + '"/>' +
       '<div class="row"><button class="btn primary" type="submit" id="genBtn">Generate video</button>' +
       '<a class="btn ghost" href="#/brands/' + b.id + '/inbox">Inbox</a></div>' +
@@ -713,21 +859,23 @@
     if (!form) return;
     form.addEventListener("submit", function (e) {
       e.preventDefault();
+      var fal = form.falKey.value.trim();
       var key = form.flowKey.value.trim();
       var s = state();
       var rec = brandBy(s, b.id);
-      if (!key && !flowKeyOf(rec)) {
-        render(shell(s, keysForm(rec, "Paste your Google Flow key. Generate will not run without it.")));
-        bindKeys(rec);
-        return;
-      }
+      if (fal) rec.falKey = fal;
       if (key) {
         rec.flowKey = key;
         rec.geminiKey = key;
       }
       rec.flowProjectUrl = form.flowProjectUrl.value.trim();
+      if (!hasVideoKey(rec)) {
+        render(shell(s, keysForm(rec, "Paste a fal.ai key or a Google Flow key. Generate will not run without one.")));
+        bindKeys(rec);
+        return;
+      }
       save(s);
-      render(shell(s, keysForm(rec, null, "Google Flow key saved. You can generate a video now.")));
+      render(shell(s, keysForm(rec, null, "Key saved. You can generate a video now.")));
       bindKeys(rec);
     });
   }
@@ -757,6 +905,13 @@
     function sync() { prompt.disabled = mode.value !== "custom"; }
     mode.addEventListener("change", sync);
     sync();
+    var engineSel = document.getElementById("engine");
+    var falSel = document.getElementById("falModel");
+    if (engineSel && falSel) {
+      function syncEngine() { falSel.disabled = engineSel.value !== "fal"; }
+      engineSel.addEventListener("change", syncEngine);
+      syncEngine();
+    }
     form.addEventListener("submit", function (e) {
       e.preventDefault();
       var custom = prompt.value.trim();
@@ -769,10 +924,23 @@
       btn.disabled = true;
       var line = sceneText(b, mode.value, custom);
       var caption = form.caption.value.trim() || (b.name + (b.hook ? " — " + b.hook : ""));
-      status.textContent = "Starting Veo 3.1 with your Gemini key…";
-      generateVeo(flowKeyOf(b), line, function (msg) {
-        if (status) status.textContent = msg;
-      }).then(function (url) {
+      var engineEl = document.getElementById("engine");
+      var falModelEl = document.getElementById("falModel");
+      var engine = engineEl ? engineEl.value : (falKeyOf(b) ? "fal" : "veo");
+      var falModel = falModelEl ? falModelEl.value : "ltx-fast";
+      var run;
+      if (engine === "fal") {
+        status.textContent = "Starting fal.ai…";
+        run = generateFal(falKeyOf(b), line, falModel, function (msg) {
+          if (status) status.textContent = msg;
+        });
+      } else {
+        status.textContent = "Starting Veo 3.1 with your Gemini key…";
+        run = generateVeo(flowKeyOf(b), line, function (msg) {
+          if (status) status.textContent = msg;
+        });
+      }
+      run.then(function (url) {
         var s = state();
         var u = user(s);
         var job = {
@@ -800,7 +968,7 @@
           caption: "",
           error: "Video was not generated. " + (err && err.message
             ? (err.message.indexOf("Failed to fetch") >= 0
-              ? "The browser could not reach Google’s Veo API (blocked or offline). Confirm the Gemini key and that you opened https://tmai-tech.github.io/Makeo/"
+              ? "The browser could not reach the video API (blocked or offline). Confirm the key and that you opened this page over https."
               : err.message)
             : "Unknown error.")
         };
@@ -884,8 +1052,8 @@
       if (parts[2] === "keys") { render(shell(s, keysForm(b))); bindKeys(b); return; }
       if (parts[2] === "instagram") { render(shell(s, igForm(b))); bindIg(b); return; }
       if (parts[2] === "compose") {
-        if (!flowKeyOf(b)) {
-          render(shell(s, keysForm(b, "Enter your Google Flow key before generating a video.")));
+        if (!hasVideoKey(b)) {
+          render(shell(s, keysForm(b, "Enter a fal.ai key or a Google Flow key before generating a video.")));
           bindKeys(b);
           return;
         }
