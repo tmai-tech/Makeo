@@ -1,0 +1,20 @@
+# Credentials -- never commit. IG_ACCESS_TOKEN lives here.
+.env
+
+# Browser session: contains live Google auth cookies.
+.chrome-profile/
+
+# Makeo tenant data (jobs, assets, sqlite, per-brand chrome profiles).
+# Must stay untracked -- videos and tokens land here in later PRs.
+data/
+
+# Generated artifacts
+out/
+shots/
+prompt.txt
+today.json
+
+__pycache__/
+*.pyc
+logs/
+.trigger

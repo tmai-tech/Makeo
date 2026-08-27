@@ -1,0 +1,247 @@
+{
+  "name": "GenZ Daily Video Prompt",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "triggerAtHour": 9,
+              "triggerAtMinute": 15
+            }
+          ]
+        }
+      },
+      "id": "cron",
+      "name": "Every morning 9:15",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [-600, 300]
+    },
+    {
+      "parameters": {
+        "url": "https://news.google.com/rss/search?q=when:1d+gen+z+OR+viral+OR+trending&hl=en-IN&gl=IN&ceid=IN:en",
+        "options": {}
+      },
+      "id": "news",
+      "name": "Google News RSS",
+      "type": "n8n-nodes-base.rssFeedRead",
+      "typeVersion": 1.1,
+      "position": [-380, 200]
+    },
+    {
+      "parameters": {
+        "url": "https://trends.google.com/trending/rss?geo=IN",
+        "options": {}
+      },
+      "id": "trends",
+      "name": "Google Trends RSS",
+      "type": "n8n-nodes-base.rssFeedRead",
+      "typeVersion": 1.1,
+      "position": [-380, 400]
+    },
+    {
+      "parameters": {
+        "mode": "combine",
+        "combineBy": "combineAll",
+        "options": {}
+      },
+      "id": "merge",
+      "name": "Merge feeds",
+      "type": "n8n-nodes-base.merge",
+      "typeVersion": 3,
+      "position": [-160, 300]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Flatten both feeds to a plain title list, cap at 25 so the prompt stays cheap.\nconst titles = $input.all()\n  .map(i => i.json.title)\n  .filter(Boolean)\n  .slice(0, 25);\nreturn [{ json: { headlines: titles.join('\\n') } }];"
+      },
+      "id": "flatten",
+      "name": "Flatten headlines",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [60, 300]
+    },
+    {
+      "parameters": {
+        "modelId": "models/gemini-2.5-flash",
+        "messages": {
+          "values": [
+            {
+              "content": "=You pick ONE story from today's headlines that Gen Z (16-26) would actually stop scrolling for, and turn it into an 8-second vertical video.\n\nHeadlines:\n{{ $json.headlines }}\n\nRules:\n- Pick the story with genuine Gen Z pull: culture, money/side-hustle, tech, internet drama. Skip politics and anything grim.\n- veo_prompt must be ONE paragraph describing shot, subject, camera move, lighting, mood, and spoken line. Vertical 9:16, 8 seconds. No text overlays, no logos, no watermarks.\n- caption: max 120 chars, Gen Z register, no hashtag spam, 3 hashtags max.\n\nReturn ONLY valid JSON:\n{\"topic\":\"...\",\"why_genz\":\"...\",\"veo_prompt\":\"...\",\"caption\":\"...\"}",
+              "role": "user"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "gemini",
+      "name": "Gemini: pick trend + write prompt",
+      "type": "@n8n/n8n-nodes-langchain.googleGemini",
+      "typeVersion": 1,
+      "position": [280, 300]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Gemini likes to wrap JSON in ```json fences. Strip and parse.\nconst raw = $json.content?.parts?.[0]?.text ?? $json.text ?? JSON.stringify($json);\nconst clean = raw.replace(/```json\\s*|```/g, '').trim();\nlet d;\ntry {\n  d = JSON.parse(clean);\n} catch (e) {\n  throw new Error('Gemini did not return JSON: ' + clean.slice(0, 300));\n}\nfor (const k of ['topic', 'veo_prompt', 'caption']) {\n  if (!d[k]) throw new Error('missing field: ' + k);\n}\nreturn [{ json: d }];"
+      },
+      "id": "parse",
+      "name": "Parse JSON",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [500, 300]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "PASTE_YOUR_GOOGLE_CHAT_WEBHOOK_URL_HERE",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({\n  cardsV2: [{\n    cardId: 'genz-' + Date.now(),\n    card: {\n      header: { title: 'Today: ' + $json.topic, subtitle: 'Gen Z daily video' },\n      sections: [\n        { widgets: [{ decoratedText: { topLabel: 'Why it lands', text: $json.why_genz, wrapText: true } }] },\n        { header: 'Veo prompt', widgets: [{ textParagraph: { text: $json.veo_prompt } }] },\n        { header: 'Caption', widgets: [{ textParagraph: { text: $json.caption } }] }\n      ]\n    }\n  }]\n}) }}",
+        "options": {}
+      },
+      "id": "chat",
+      "name": "Post card to Google Chat",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [720, 200]
+    },
+    {
+      "parameters": {
+        "fileName": "=f:/Content Generator/prompt.txt",
+        "dataPropertyName": "data",
+        "options": {}
+      },
+      "id": "writefile",
+      "name": "Write prompt.txt",
+      "type": "n8n-nodes-base.readWriteFile",
+      "typeVersion": 1,
+      "position": [720, 400]
+    },
+    {
+      "parameters": {
+        "operation": "toText",
+        "sourceProperty": "veo_prompt",
+        "options": {}
+      },
+      "id": "tofile",
+      "name": "Prompt to binary",
+      "type": "n8n-nodes-base.convertToFile",
+      "typeVersion": 1.1,
+      "position": [500, 400]
+    },
+    {
+      "parameters": {
+        "triggerOn": "specificFolder",
+        "path": "f:/Content Generator/out",
+        "events": ["add"],
+        "options": { "usePolling": true }
+      },
+      "id": "watch",
+      "name": "Watch out/ for new mp4",
+      "type": "n8n-nodes-base.localFileTrigger",
+      "typeVersion": 1,
+      "position": [-600, 700]
+    },
+    {
+      "parameters": {
+        "fileSelector": "={{ $json.path }}",
+        "options": { "dataPropertyName": "data" }
+      },
+      "id": "readmp4",
+      "name": "Read mp4",
+      "type": "n8n-nodes-base.readWriteFile",
+      "typeVersion": 1,
+      "position": [-380, 700]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://localhost:5000/api/public/v1/upload",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "Authorization", "value": "PASTE_POSTIZ_API_KEY" }
+          ]
+        },
+        "contentType": "multipart-form-data",
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            { "parameterType": "formBinaryData", "name": "file", "inputDataFieldName": "data" }
+          ]
+        },
+        "options": {}
+      },
+      "id": "upload",
+      "name": "Postiz: upload video",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [-160, 700]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://localhost:5000/api/public/v1/posts",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "Authorization", "value": "PASTE_POSTIZ_API_KEY" }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({\n  type: 'now',\n  posts: [\n    { integration: { id: 'PASTE_INSTAGRAM_INTEGRATION_ID' },\n      value: [{ content: $('Read caption').first().json.caption, image: [{ id: $json.id }] }] },\n    { integration: { id: 'PASTE_FACEBOOK_INTEGRATION_ID' },\n      value: [{ content: $('Read caption').first().json.caption, image: [{ id: $json.id }] }] }\n  ]\n}) }}",
+        "options": {}
+      },
+      "id": "post",
+      "name": "Postiz: publish IG + FB",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [60, 700]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Caption written this morning, saved alongside the prompt.\nconst fs = require('fs');\ntry {\n  const d = JSON.parse(fs.readFileSync('f:/Content Generator/today.json', 'utf8'));\n  return [{ json: d }];\n} catch (e) {\n  throw new Error('today.json missing -- did the morning run complete?');\n}"
+      },
+      "id": "readcaption",
+      "name": "Read caption",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [-380, 850]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Persist topic + caption so the evening post picks up the right text.\nconst fs = require('fs');\nfs.writeFileSync('f:/Content Generator/today.json', JSON.stringify($json, null, 2));\nreturn [{ json: $json }];"
+      },
+      "id": "savetoday",
+      "name": "Save today.json",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [720, 560]
+    }
+  ],
+  "connections": {
+    "Every morning 9:15": {
+      "main": [[{ "node": "Google News RSS", "type": "main", "index": 0 }, { "node": "Google Trends RSS", "type": "main", "index": 0 }]]
+    },
+    "Google News RSS": { "main": [[{ "node": "Merge feeds", "type": "main", "index": 0 }]] },
+    "Google Trends RSS": { "main": [[{ "node": "Merge feeds", "type": "main", "index": 1 }]] },
+    "Merge feeds": { "main": [[{ "node": "Flatten headlines", "type": "main", "index": 0 }]] },
+    "Flatten headlines": { "main": [[{ "node": "Gemini: pick trend + write prompt", "type": "main", "index": 0 }]] },
+    "Gemini: pick trend + write prompt": { "main": [[{ "node": "Parse JSON", "type": "main", "index": 0 }]] },
+    "Parse JSON": {
+      "main": [[
+        { "node": "Post card to Google Chat", "type": "main", "index": 0 },
+        { "node": "Prompt to binary", "type": "main", "index": 0 },
+        { "node": "Save today.json", "type": "main", "index": 0 }
+      ]]
+    },
+    "Prompt to binary": { "main": [[{ "node": "Write prompt.txt", "type": "main", "index": 0 }]] },
+    "Watch out/ for new mp4": { "main": [[{ "node": "Read caption", "type": "main", "index": 0 }]] },
+    "Read caption": { "main": [[{ "node": "Read mp4", "type": "main", "index": 0 }]] },
+    "Read mp4": { "main": [[{ "node": "Postiz: upload video", "type": "main", "index": 0 }]] },
+    "Postiz: upload video": { "main": [[{ "node": "Postiz: publish IG + FB", "type": "main", "index": 0 }]] }
+  },
+  "settings": { "executionOrder": "v1" }
+}
