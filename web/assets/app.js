@@ -634,7 +634,8 @@
     s.brands = s.brands.filter(function (x) { return x.id !== id; });
     s.jobs = s.jobs.filter(function (j) { return j.brandId !== id; });
     save(s);
-    go("/home");
+    if (route() === "/home") paint();
+    else go("/home");
   }
 
   function bindDeletes() {
