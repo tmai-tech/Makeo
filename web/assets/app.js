@@ -407,7 +407,9 @@
             '<div class="row"><a href="#/brands/' + b.id + '/keys">Flow key</a>' +
             ' · <a href="#/brands/' + b.id + '/compose">Generate</a>' +
             ' · <a href="#/brands/' + b.id + '/inbox">Inbox</a>' +
-            ' · <a href="#/brands/' + b.id + '/instagram">Instagram</a></div></div>';
+            ' · <a href="#/brands/' + b.id + '/instagram">Instagram</a></div>' +
+            '<div class="row"><button type="button" class="btn no deleteBrand" data-id="' + b.id +
+            '" data-name="' + esc(b.name) + '">Delete brand</button></div></div>';
         }).join("")
       : '<p class="muted">No brands yet. Create one to start.</p>';
     return (
@@ -433,7 +435,10 @@
       '<label>Logo (optional)</label><input name="logo" type="file" accept="image/*"/>' +
       (b.logo ? '<p><img class="logo-preview" src="' + b.logo + '" alt="logo"/></p>' : "") +
       '<label>Splash / end-card (optional)</label><input name="splash" type="file" accept="image/*,.gif"/>' +
-      '<div class="row"><button class="btn primary" type="submit">Save and enter Flow key</button></div></form>' +
+      '<div class="row"><button class="btn primary" type="submit">Save and enter Flow key</button>' +
+      (b.id ? '<button type="button" class="btn no deleteBrand" data-id="' + b.id +
+        '" data-name="' + esc(b.name) + '">Delete this brand</button>' : "") +
+      "</div></form>" +
       (b.id
         ? '<p><a href="#/brands/' + b.id + '/keys">Google Flow key</a> · <a href="#/brands/' + b.id + '/compose">Generate</a> · <a href="#/brands/' + b.id + '/inbox">Inbox</a></p>'
         : "") +
@@ -613,6 +618,29 @@
         var s = state();
         render(shell(s, authForm(kind, err.message || "Login failed."), { landing: true }));
         bindAuth(kind);
+      });
+    });
+  }
+
+  function deleteBrand(id, name) {
+    var label = name || "this brand";
+    if (!window.confirm("Delete “" + label + "” and all its videos in this browser? This cannot be undone.")) {
+      return;
+    }
+    var s = state();
+    var u = user(s);
+    var b = brandBy(s, id);
+    if (!ownBrand(s, b)) return;
+    s.brands = s.brands.filter(function (x) { return x.id !== id; });
+    s.jobs = s.jobs.filter(function (j) { return j.brandId !== id; });
+    save(s);
+    go("/home");
+  }
+
+  function bindDeletes() {
+    document.querySelectorAll(".deleteBrand").forEach(function (btn) {
+      btn.addEventListener("click", function () {
+        deleteBrand(btn.getAttribute("data-id"), btn.getAttribute("data-name"));
       });
     });
   }
@@ -810,7 +838,7 @@
       return;
     }
     if (!user(s)) { go("/login"); return; }
-    if (path === "/home") { render(shell(s, home(s))); return; }
+    if (path === "/home") { render(shell(s, home(s))); bindDeletes(); return; }
     if (path === "/brands/new") {
       render(shell(s, brandForm(null)));
       bindBrand(null);
@@ -845,6 +873,7 @@
       }
       render(shell(s, brandForm(b)));
       bindBrand(b);
+      bindDeletes();
       return;
     }
     render(shell(s, landing(), { landing: true }));
