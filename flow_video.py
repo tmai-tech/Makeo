@@ -20,12 +20,17 @@ English UI only -- "Create"/"Download" are matched by visible text.
 """
 
 import argparse
+import os
 import sys
 import time
 from pathlib import Path
 
-from playwright.sync_api import TimeoutError as PWTimeout
-from playwright.sync_api import sync_playwright
+try:
+    from playwright.sync_api import TimeoutError as PWTimeout
+    from playwright.sync_api import sync_playwright
+except ImportError:  # dest_name() is unit-tested without playwright installed
+    PWTimeout = Exception
+    sync_playwright = None
 
 # Override with --project once you know which project the new account owns.
 PROJECT_URL = "https://labs.google/fx/tools/flow/project/84c30188-252c-4b46-bdb7-99a4699f66e7"
@@ -37,10 +42,11 @@ GEN_TIMEOUT_S = 900  # 15 min; Veo renders run several minutes
 POLL_S = 10
 
 
-def fail(page, msg):
+def fail(page, msg, shots_dir=None):
     """Loud failure: screenshot + non-zero exit. Never silently continue."""
-    SHOTS_DIR.mkdir(exist_ok=True)
-    shot = SHOTS_DIR / f"fail-{int(time.time())}.png"
+    dest_dir = Path(shots_dir) if shots_dir else SHOTS_DIR
+    dest_dir.mkdir(parents=True, exist_ok=True)
+    shot = dest_dir / f"fail-{int(time.time())}.png"
     try:
         page.screenshot(path=str(shot), full_page=True)
     except Exception:
@@ -135,6 +141,13 @@ def wait_for_new_media(page, before, deadline):
     return None
 
 
+def dest_name(now=None):
+    job_id = os.environ.get("MAKEO_JOB_ID")
+    if job_id:
+        return f"flow-{job_id}.mp4"
+    return f"flow-{int(now if now is not None else time.time())}.mp4"
+
+
 def download_newest(page, out_dir):
     """Fetch the newest tile's video bytes straight from its media URL.
 
@@ -159,7 +172,7 @@ def download_newest(page, out_dir):
         fail(page, f"media fetch failed: {resp.status} {resp.status_text}")
 
     out_dir.mkdir(exist_ok=True)
-    dest = out_dir / f"flow-{int(time.time())}.mp4"
+    dest = out_dir / dest_name()
     dest.write_bytes(resp.body())
     if dest.stat().st_size < 10_000:  # a real 8s clip is ~MBs; tiny = error page
         fail(page, f"downloaded file suspiciously small: {dest.stat().st_size} bytes")
@@ -173,13 +186,22 @@ def main():
     ap.add_argument("--login", action="store_true", help="open browser to sign in, then exit")
     ap.add_argument("--project", default=PROJECT_URL, help="Flow project URL to drive")
     ap.add_argument("--out", type=Path, default=OUT_DIR)
+    ap.add_argument("--profile-dir", type=Path, default=PROFILE_DIR,
+                    help="persistent Chrome profile (per-brand when Makeo)")
     ap.add_argument("--chromium", action="store_true", help="bundled Chromium instead of Chrome")
     ap.add_argument("--headless", action="store_true", help="not recommended: Google flags it")
     args = ap.parse_args()
+    if sync_playwright is None:
+        sys.exit("playwright is not installed -- pip install playwright")
+
+    global SHOTS_DIR
+    if args.out != OUT_DIR or "--out" in sys.argv:
+        SHOTS_DIR = args.out / "shots"
+    out_was_set = "--out" in sys.argv
 
     with sync_playwright() as pw:
         ctx = pw.chromium.launch_persistent_context(
-            str(PROFILE_DIR),
+            str(args.profile_dir),
             headless=args.headless,
             channel=None if args.chromium else "chrome",
             accept_downloads=True,
@@ -233,7 +255,12 @@ def main():
         # every make_prompt run, so a later run silently leaves the caption
         # describing a different clip -- that already happened once and would
         # have posted a dating-app video captioned about saving money.
-        meta = Path(__file__).parent / "today.json"
+        # When --out is set, ONLY {out}/today.json. Never fall back to repo-root
+        # today.json (that is the dating-app caption bug across tenants).
+        if out_was_set:
+            meta = args.out / "today.json"
+        else:
+            meta = Path(__file__).parent / "today.json"
         if meta.exists():
             dest.with_suffix(".json").write_text(
                 meta.read_text(encoding="utf-8"), encoding="utf-8")

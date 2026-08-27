@@ -155,7 +155,19 @@ def main():
             run(*mp)
         print("\n=== 2/4 generating video (this takes a few minutes) ===", flush=True)
         prompt_file = (out_dir / "prompt.txt") if out_dir else Path("prompt.txt")
-        run("flow_video.py", "--prompt-file", prompt_file, "--headless")
+        flow = ["flow_video.py", "--prompt-file", prompt_file, "--headless"]
+        if out_dir:
+            flow += ["--out", out_dir]
+        project = None
+        profile = None
+        if cfg:
+            project = cfg.flow_project_url or None
+            profile = cfg.flow_profile_dir or None
+        if project:
+            flow += ["--project", project]
+        if profile:
+            flow += ["--profile-dir", profile]
+        run(*flow)
 
     if job_id:
         video = job_video(out_dir or (HERE / "out"), job_id)
