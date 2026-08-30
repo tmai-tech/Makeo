@@ -173,9 +173,12 @@ def serve(pipe, port: int = PORT) -> str:
     public = _tunnel(port)
     print("\n" + "=" * 60)
     print("Makeo catalog worker is up.")
-    print("Paste this URL on Makeo → Catalog → Colab worker URL:")
+    print("PASTE THIS on Makeo → Catalog → Colab worker URL")
+    print("(NOT colab.research.google.com)")
+    print()
     print(" ", public)
-    print("Leave this cell running. Keep the Colab tab open.")
+    print()
+    print("Leave this cell running. Keep this Colab tab open.")
     print("=" * 60 + "\n")
     try:
         while True:

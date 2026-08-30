@@ -1037,6 +1037,27 @@
     return String((b && b.catalogWorkerUrl) || "").trim().replace(/\/+$/, "");
   }
 
+  function workerUrlError(raw) {
+    var u = String(raw || "").trim();
+    if (!u) {
+      return "Paste the URL Colab printed after Start worker — it looks like https://random-words.trycloudflare.com";
+    }
+    var low = u.toLowerCase();
+    if (low.indexOf("colab.research.google.com") >= 0 || low.indexOf("colab.google") >= 0) {
+      return "That is the Colab notebook tab, not the worker. In Colab scroll to the last cell (Start worker), run it, and copy the https://….trycloudflare.com line.";
+    }
+    if (low.indexOf("github.com") >= 0 || low.indexOf("githubusercontent.com") >= 0) {
+      return "That is a GitHub link. You need the trycloudflare.com URL printed by the Colab worker cell.";
+    }
+    if (low.indexOf("trycloudflare.com") < 0 && low.indexOf("ngrok") < 0 && low.indexOf("loca.lt") < 0) {
+      return "This does not look like a tunnel URL. It must be https://….trycloudflare.com from the Colab worker cell output.";
+    }
+    if (low.indexOf("http://") === 0) {
+      return "Use the https:// trycloudflare URL. This site cannot call a plain http worker.";
+    }
+    return "";
+  }
+
   function catalogPage(b, note) {
     var shots = (b.catalogShots || []).slice().reverse();
     var gallery = shots.length
@@ -1058,7 +1079,7 @@
       '<button type="button" class="btn ghost" id="saveWorker">Save</button>' +
       '<button type="button" class="btn ghost" id="startColab">Start Colab</button>' +
       "</div>" +
-      '<p class="muted">In Colab: T4 → Run all → run the last <strong>Start worker</strong> cell. Paste the trycloudflare URL here. Keep that tab open.</p>' +
+      '<p class="muted">Not the <code>colab.research.google.com</code> link. Run the last Colab cell (<strong>Start worker</strong>) and paste the <code>https://….trycloudflare.com</code> line it prints. Keep that Colab tab open.</p>' +
       '<div class="cat-grid">' +
       '<div><label>Model</label><div class="drop" id="dropPerson"><span class="hint">Indian model · full body or 3/4</span>' +
       '<input type="file" id="filePerson" accept="image/*"/></div></div>' +
@@ -1148,15 +1169,19 @@
     var saveBtn = document.getElementById("saveWorker");
     if (saveBtn) {
       saveBtn.addEventListener("click", function () {
+        var typed = (urlInput.value || "").trim().replace(/\/+$/, "");
+        var why = workerUrlError(typed);
+        if (why) {
+          if (status) status.innerHTML = '<span class="error">' + esc(why) + "</span>";
+          return;
+        }
         var s = state();
         var rec = brandBy(s, b.id);
-        rec.catalogWorkerUrl = (urlInput.value || "").trim().replace(/\/+$/, "");
+        rec.catalogWorkerUrl = typed;
         save(s);
         b = rec;
         pingWorker(workerUrlOf(b), pill);
-        if (status) status.innerHTML = rec.catalogWorkerUrl
-          ? '<span class="ok">Saved. Checking the worker…</span>'
-          : '<span class="error">Paste the trycloudflare URL from the Colab worker cell.</span>';
+        if (status) status.innerHTML = '<span class="ok">Saved. Checking /health on the worker…</span>';
       });
     }
 
@@ -1168,8 +1193,9 @@
       var base = workerUrlOf(rec);
       var person = document.getElementById("filePerson").files[0];
       var garment = document.getElementById("fileGarment").files[0];
-      if (!base) {
-        status.innerHTML = '<span class="error">Save a Colab worker URL first.</span>';
+      var why = workerUrlError(base);
+      if (why) {
+        status.innerHTML = '<span class="error">' + esc(why) + "</span>";
         return;
       }
       if (!person || !garment) {

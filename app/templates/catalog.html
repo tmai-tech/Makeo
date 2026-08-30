@@ -6,10 +6,10 @@
 <form method="post">
   <input type="hidden" name="csrf" value="{{ csrf }}">
   <label>Colab worker URL</label>
-  <input name="worker_url" value="{{ worker_url }}" placeholder="https://….trycloudflare.com">
+  <input name="worker_url" value="{{ worker_url }}" placeholder="https://something.trycloudflare.com">
   <button>Save worker URL</button>
 </form>
-<p class="mut">In Colab: T4 → Run all → run the last <strong>Start worker</strong> cell. Paste the URL here.</p>
+<p class="mut">Not the colab.research.google.com tab. Run the last Colab cell and paste the <code>trycloudflare.com</code> URL it prints.</p>
 <p>
   <a class="btn" target="makeo-colab" rel="noopener"
      href="https://colab.research.google.com/github/tmai-tech/Makeo/blob/explore-catalog-vton/notebooks/fashn_vton_colab.ipynb">Start Colab</a>
