@@ -11,6 +11,31 @@
   <input name="caption">
   <button>Generate</button>
 </form>
+<section class="card">
+  <h2>Catalog try-on · Indian outfits</h2>
+  <p class="mut">Opens FASHN VTON 1.5 on a free Colab T4 in a new tab. This page stays here. Google will not run the notebook until you click once in Colab.</p>
+  <ol>
+    <li>Start Colab (new tab).</li>
+    <li>There: Runtime → T4 GPU, then Runtime → Run all.</li>
+    <li>Come back here while weights download.</li>
+    <li>When Colab asks for photos, switch tabs and upload.</li>
+  </ol>
+  <p>
+    <a class="btn" id="startColab" target="makeo-colab" rel="noopener"
+       href="https://colab.research.google.com/github/tmai-tech/Makeo/blob/explore-catalog-vton/notebooks/fashn_vton_colab.ipynb">Start Colab</a>
+  </p>
+  <p class="mut" id="colabStatus"></p>
+</section>
+<script>
+(function () {
+  var a = document.getElementById("startColab");
+  var s = document.getElementById("colabStatus");
+  if (!a) return;
+  a.addEventListener("click", function () {
+    if (s) s.textContent = "Colab is in another tab. This page is still yours. In Colab: T4 GPU, then Runtime → Run all.";
+  });
+})();
+</script>
 <h2>Library</h2>
 {% for j in jobs %}
   <div class="card">

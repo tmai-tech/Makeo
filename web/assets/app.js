@@ -2,6 +2,9 @@
   var KEY = "makeo-demo-v2";
   var PREV_KEYS = ["makeo-demo-v1"];
   var clips = {};
+  // Colab pulls this git file. It cannot auto-run cells (Google blocks that).
+  var COLAB_NOTEBOOK =
+    "https://colab.research.google.com/github/tmai-tech/Makeo/blob/explore-catalog-vton/notebooks/fashn_vton_colab.ipynb";
 
   function load() {
     try { return JSON.parse(localStorage.getItem(KEY) || "{}"); }
@@ -552,7 +555,7 @@
           return '<div class="card"><a href="#/brands/' + b.id + '"><strong>' + esc(b.name) +
             "</strong></a><div class=\"muted\">" + esc(b.slug) + "</div>" +
             '<div class="row"><a href="#/brands/' + b.id + '/keys">Keys</a>' +
-            ' · <a href="#/brands/' + b.id + '/compose">Generate</a>' +
+            ' · <a href="#/brands/' + b.id + '/compose">Generate / catalog</a>' +
             ' · <a href="#/brands/' + b.id + '/inbox">Inbox</a>' +
             ' · <a href="#/brands/' + b.id + '/instagram">Instagram</a></div>' +
             '<div class="row"><button type="button" class="btn no deleteBrand" data-id="' + b.id +
@@ -688,7 +691,27 @@
       '<label>Caption (optional)</label><input name="caption" placeholder="' + esc(b.name) + '"/>' +
       '<div class="row"><button class="btn primary" type="submit" id="genBtn">Generate video</button>' +
       '<a class="btn ghost" href="#/brands/' + b.id + '/inbox">Inbox</a></div>' +
-      '<p class="status" id="composeStatus"></p></form></section>'
+      '<p class="status" id="composeStatus"></p></form></section>' +
+      catalogPanel()
+    );
+  }
+
+  function catalogPanel() {
+    return (
+      '<section class="panel" id="catalogPanel" style="margin-top:20px">' +
+      "<h2>Catalog try-on · Indian outfits</h2>" +
+      '<p class="muted">Starts <strong>FASHN VTON 1.5</strong> on a free Colab T4 in a <strong>new tab</strong>. This Makeo tab stays open so you can keep working. Google will not run the notebook until you click once in Colab.</p>' +
+      '<ol class="steps">' +
+      "<li>Click <strong>Start Colab</strong> — a new tab opens the latest notebook from git.</li>" +
+      "<li>In that tab: Runtime → Change runtime type → <strong>T4 GPU</strong>, then Runtime → <strong>Run all</strong>.</li>" +
+      "<li>Come back here. Colab downloads weights for several minutes by itself.</li>" +
+      "<li>When Colab asks for a person photo and a garment photo, switch back to that tab and upload.</li>" +
+      "</ol>" +
+      '<div class="row">' +
+      '<button type="button" class="btn primary" id="startColab">Start Colab</button>' +
+      '<a class="btn ghost" href="https://huggingface.co/spaces/fashn-ai/fashn-vton-1.5" target="_blank" rel="noopener">Open HF Space instead</a>' +
+      "</div>" +
+      '<p class="status" id="colabStatus"></p></section>'
     );
   }
 
@@ -915,7 +938,10 @@
     var prompt = document.getElementById("prompt");
     var status = document.getElementById("composeStatus");
     var btn = document.getElementById("genBtn");
-    if (!form) return;
+    if (!form) {
+      bindCatalog();
+      return;
+    }
     function sync() { prompt.disabled = mode.value !== "custom"; }
     mode.addEventListener("change", sync);
     sync();
@@ -992,6 +1018,24 @@
         bindCompose(b);
       });
     });
+    bindCatalog();
+  }
+
+  function bindCatalog() {
+    var btn = document.getElementById("startColab");
+    var status = document.getElementById("colabStatus");
+    if (!btn) return;
+    btn.addEventListener("click", function () {
+      var tab = window.open(COLAB_NOTEBOOK, "makeo-colab");
+      if (status) {
+        status.innerHTML = tab
+          ? '<span class="ok">Colab is in another tab. This site is still running. In Colab: pick <strong>T4 GPU</strong>, then <strong>Runtime → Run all</strong>. Stay here until it asks for photos.</span>'
+          : '<span class="error">The browser blocked the new tab. Allow pop-ups, or <a href="' +
+            COLAB_NOTEBOOK +
+            '" target="_blank" rel="noopener">open Colab yourself</a>.</span>';
+      }
+      try { sessionStorage.setItem("makeo-colab-launched", String(Date.now())); } catch (e) {}
+    });
   }
 
   function bindInbox(b) {
@@ -1066,11 +1110,6 @@
       if (parts[2] === "keys") { render(shell(s, keysForm(b))); bindKeys(b); return; }
       if (parts[2] === "instagram") { render(shell(s, igForm(b))); bindIg(b); return; }
       if (parts[2] === "compose") {
-        if (!hasVideoKey(b)) {
-          render(shell(s, keysForm(b, "Enter a fal.ai key or a Google Flow key before generating a video.")));
-          bindKeys(b);
-          return;
-        }
         render(shell(s, compose(b)));
         bindCompose(b);
         return;

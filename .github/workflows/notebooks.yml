@@ -1,0 +1,54 @@
+name: Catalog notebooks
+
+# Colab is not a deploy target. It opens this repo over HTTPS.
+# This job only proves the notebook is still valid after a push.
+# Latest main:
+#   https://colab.research.google.com/github/tmai-tech/Makeo/blob/main/notebooks/fashn_vton_colab.ipynb
+# This ref (PR / branch):
+#   https://colab.research.google.com/github/tmai-tech/Makeo/blob/<sha>/notebooks/fashn_vton_colab.ipynb
+
+on:
+  push:
+    paths:
+      - "notebooks/**"
+      - ".github/workflows/notebooks.yml"
+  pull_request:
+    paths:
+      - "notebooks/**"
+      - ".github/workflows/notebooks.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Validate notebooks
+        run: python notebooks/check_notebook.py
+
+      - name: Colab URLs
+        env:
+          SHA: ${{ github.sha }}
+          REF: ${{ github.ref_name }}
+        run: |
+          {
+            echo "### Open this commit in Colab"
+            echo ""
+            echo "Colab always **pulls** from GitHub. There is nothing to deploy."
+            echo "A Drive copy (*Save a copy in Drive*) will **not** update on push."
+            echo ""
+            echo "- This SHA: https://colab.research.google.com/github/tmai-tech/Makeo/blob/${SHA}/notebooks/fashn_vton_colab.ipynb"
+            echo "- This ref (\`${REF}\`): https://colab.research.google.com/github/tmai-tech/Makeo/blob/${REF}/notebooks/fashn_vton_colab.ipynb"
+            echo "- Latest main: https://colab.research.google.com/github/tmai-tech/Makeo/blob/main/notebooks/fashn_vton_colab.ipynb"
+            echo "- Short link (Pages, after web/ deploys): https://tmai-tech.github.io/Makeo/colab/fashn-vton/"
+            echo ""
+            echo "Runtime → Change runtime type → **T4 GPU**."
+          } >> "$GITHUB_STEP_SUMMARY"

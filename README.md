@@ -19,6 +19,13 @@ Walk the live demo there: **Create account → New brand → Instagram → Gener
 Same hosting path as the other tmai-tech static apps: `web/` deploys on every
 push to `main` via `.github/workflows/deploy-pages.yml`.
 
+**Catalog try-on lab (FASHN VTON 1.5, Colab T4):** Colab is not deployed to.
+It opens the notebook from this repo. After the file is on `main`, use
+[Open in Colab](https://colab.research.google.com/github/tmai-tech/Makeo/blob/explore-catalog-vton/notebooks/fashn_vton_colab.ipynb)
+or https://tmai-tech.github.io/Makeo/colab/fashn-vton/ .
+Do not keep a Drive copy — it will not update on `git push`. Details in
+[`notebooks/README.md`](notebooks/README.md).
+
 **v1 is waitlisted.** Each brand brings its own Gemini key and Google Flow
 login. Approval is in-app (Discord comes later). The worker is this git
 checkout plus Chrome — clone and run. Not GitHub Actions. Not Task Scheduler

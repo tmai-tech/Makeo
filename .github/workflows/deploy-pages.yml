@@ -92,6 +92,7 @@ jobs:
             echo "- Live (main): **https://tmai-tech.github.io/Makeo/**"
             echo "- fal preview: **https://tmai-tech.github.io/Makeo/preview/fal/**"
             echo "- Preview index: **https://tmai-tech.github.io/Makeo/preview/**"
+            echo "- FASHN VTON Colab: **https://tmai-tech.github.io/Makeo/colab/fashn-vton/**"
             echo ""
             echo "Deployed page_url: ${{ steps.deployment.outputs.page_url }}"
           } >> "$GITHUB_STEP_SUMMARY"
