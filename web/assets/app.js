@@ -555,7 +555,8 @@
           return '<div class="card"><a href="#/brands/' + b.id + '"><strong>' + esc(b.name) +
             "</strong></a><div class=\"muted\">" + esc(b.slug) + "</div>" +
             '<div class="row"><a href="#/brands/' + b.id + '/keys">Keys</a>' +
-            ' · <a href="#/brands/' + b.id + '/compose">Generate / catalog</a>' +
+            ' · <a href="#/brands/' + b.id + '/compose">Generate</a>' +
+            ' · <a href="#/brands/' + b.id + '/catalog">Catalog</a>' +
             ' · <a href="#/brands/' + b.id + '/inbox">Inbox</a>' +
             ' · <a href="#/brands/' + b.id + '/instagram">Instagram</a></div>' +
             '<div class="row"><button type="button" class="btn no deleteBrand" data-id="' + b.id +
@@ -591,7 +592,7 @@
           '" data-name="' + esc(b.name) + '">Delete this brand</button></div>'
         : "") +
       (b.id
-        ? '<p><a href="#/brands/' + b.id + '/keys">Keys</a> · <a href="#/brands/' + b.id + '/compose">Generate</a> · <a href="#/brands/' + b.id + '/inbox">Inbox</a></p>'
+        ? '<p><a href="#/brands/' + b.id + '/keys">Keys</a> · <a href="#/brands/' + b.id + '/compose">Generate</a> · <a href="#/brands/' + b.id + '/catalog">Catalog</a> · <a href="#/brands/' + b.id + '/inbox">Inbox</a></p>'
         : "") +
       "</section>"
     );
@@ -692,24 +693,18 @@
       '<div class="row"><button class="btn primary" type="submit" id="genBtn">Generate video</button>' +
       '<a class="btn ghost" href="#/brands/' + b.id + '/inbox">Inbox</a></div>' +
       '<p class="status" id="composeStatus"></p></form></section>' +
-      catalogPanel()
+      catalogPanel(b)
     );
   }
 
-  function catalogPanel() {
+  function catalogPanel(b) {
     return (
       '<section class="panel" id="catalogPanel" style="margin-top:20px">' +
       "<h2>Catalog try-on · Indian outfits</h2>" +
-      '<p class="muted">Starts <strong>FASHN VTON 1.5</strong> on a free Colab T4 in a <strong>new tab</strong>. This Makeo tab stays open so you can keep working. Google will not run the notebook until you click once in Colab.</p>' +
-      '<ol class="steps">' +
-      "<li>Click <strong>Start Colab</strong> — a new tab opens the latest notebook from git.</li>" +
-      "<li>In that tab: Runtime → Change runtime type → <strong>T4 GPU</strong>, then Runtime → <strong>Run all</strong>.</li>" +
-      "<li>Come back here. Colab downloads weights for several minutes by itself.</li>" +
-      "<li>When Colab asks for a person photo and a garment photo, switch back to that tab and upload.</li>" +
-      "</ol>" +
+      '<p class="muted">A dedicated page: upload a model and a garment, send them to the Colab T4 in the background, keep working here.</p>' +
       '<div class="row">' +
-      '<button type="button" class="btn primary" id="startColab">Start Colab</button>' +
-      '<a class="btn ghost" href="https://huggingface.co/spaces/fashn-ai/fashn-vton-1.5" target="_blank" rel="noopener">Open HF Space instead</a>' +
+      '<a class="btn primary" href="#/brands/' + b.id + '/catalog">Open catalog creator</a>' +
+      '<button type="button" class="btn ghost" id="startColab">Start Colab worker</button>' +
       "</div>" +
       '<p class="status" id="colabStatus"></p></section>'
     );
@@ -1038,6 +1033,204 @@
     });
   }
 
+  function workerUrlOf(b) {
+    return String((b && b.catalogWorkerUrl) || "").trim().replace(/\/+$/, "");
+  }
+
+  function catalogPage(b, note) {
+    var shots = (b.catalogShots || []).slice().reverse();
+    var gallery = shots.length
+      ? '<h2>Looks</h2><div class="cat-shots">' + shots.map(function (s) {
+          return '<a href="' + s.url + '" download="makeo-catalog-' + esc(s.id) + '.png" title="' +
+            esc(s.category || "") + '"><img src="' + s.url + '" alt="catalog look"/></a>';
+        }).join("") + "</div>"
+      : '<p class="muted">No looks yet. Connect Colab, drop a model and a garment, then create.</p>';
+    return (
+      '<div class="cat-head">' +
+      "<div><h1>Catalog · " + esc(b.name) + "</h1>" +
+      '<p class="muted">Put this brand’s real outfit on a model. Colab stays in the other tab and does the GPU work.</p></div>' +
+      '<div><span class="worker bad" id="workerPill">Worker offline</span></div></div>' +
+      (note ? '<p class="banner">' + note + "</p>" : "") +
+      '<section class="panel">' +
+      '<label>Colab worker URL</label>' +
+      '<div class="row worker-row">' +
+      '<input id="workerUrl" placeholder="https://….trycloudflare.com" value="' + esc(b.catalogWorkerUrl || "") + '"/>' +
+      '<button type="button" class="btn ghost" id="saveWorker">Save</button>' +
+      '<button type="button" class="btn ghost" id="startColab">Start Colab</button>' +
+      "</div>" +
+      '<p class="muted">In Colab: T4 → Run all → run the last <strong>Start worker</strong> cell. Paste the trycloudflare URL here. Keep that tab open.</p>' +
+      '<div class="cat-grid">' +
+      '<div><label>Model</label><div class="drop" id="dropPerson"><span class="hint">Indian model · full body or 3/4</span>' +
+      '<input type="file" id="filePerson" accept="image/*"/></div></div>' +
+      '<div><label>Garment</label><div class="drop" id="dropGarment"><span class="hint">Flat-lay or hanger · show pallu / border</span>' +
+      '<input type="file" id="fileGarment" accept="image/*"/></div></div>' +
+      '<div><label>Result</label><div class="cat-result" id="catResult"><span class="muted">Waiting</span></div></div>' +
+      "</div>" +
+      '<label>Outfit type</label><div class="chips" id="catCategory">' +
+      '<button type="button" class="chip on" data-v="one-pieces">Saree / anarkali</button>' +
+      '<button type="button" class="chip" data-v="tops">Kurti / blouse</button>' +
+      '<button type="button" class="chip" data-v="bottoms">Palazzo / salwar</button></div>' +
+      '<label>Garment photo</label><div class="chips" id="catPhotoType">' +
+      '<button type="button" class="chip on" data-v="flat-lay">Flat-lay / hanger</button>' +
+      '<button type="button" class="chip" data-v="model">Already on a person</button></div>' +
+      '<div class="row">' +
+      '<button type="button" class="btn primary" id="catGo">Create look</button>' +
+      '<a class="btn ghost" href="#/brands/' + b.id + '/compose">Back to video</a>' +
+      "</div>" +
+      '<p class="status" id="catStatus"></p></section>' +
+      gallery
+    );
+  }
+
+  function bindDrop(inputId, dropId) {
+    var input = document.getElementById(inputId);
+    var drop = document.getElementById(dropId);
+    if (!input || !drop) return;
+    function show() {
+      var f = input.files && input.files[0];
+      var old = drop.querySelector("img");
+      if (old) old.remove();
+      if (!f) { drop.classList.remove("has"); return; }
+      var img = document.createElement("img");
+      img.alt = "";
+      img.src = URL.createObjectURL(f);
+      drop.appendChild(img);
+      drop.classList.add("has");
+    }
+    input.addEventListener("change", show);
+  }
+
+  function bindChips(id, onChange) {
+    var root = document.getElementById(id);
+    if (!root) return;
+    root.addEventListener("click", function (e) {
+      var btn = e.target.closest(".chip");
+      if (!btn) return;
+      root.querySelectorAll(".chip").forEach(function (c) { c.classList.toggle("on", c === btn); });
+      if (onChange) onChange(btn.getAttribute("data-v"));
+    });
+  }
+
+  function chipValue(id) {
+    var on = document.querySelector("#" + id + " .chip.on");
+    return on ? on.getAttribute("data-v") : "";
+  }
+
+  function pingWorker(url, pill) {
+    if (!pill) return;
+    if (!url) {
+      pill.className = "worker bad";
+      pill.textContent = "No worker URL";
+      return;
+    }
+    fetch(url + "/health").then(function (r) { return r.json(); }).then(function (d) {
+      pill.className = "worker " + (d && d.ok ? "ok" : "bad");
+      pill.textContent = d && d.ok ? "Colab worker live" : "Worker not ready";
+    }).catch(function () {
+      pill.className = "worker bad";
+      pill.textContent = "Worker offline";
+    });
+  }
+
+  function bindCatalogPage(b) {
+    bindCatalog();
+    bindDrop("filePerson", "dropPerson");
+    bindDrop("fileGarment", "dropGarment");
+    bindChips("catCategory");
+    bindChips("catPhotoType");
+    var pill = document.getElementById("workerPill");
+    var urlInput = document.getElementById("workerUrl");
+    var status = document.getElementById("catStatus");
+    pingWorker(workerUrlOf(b), pill);
+    if (window.__catPing) clearInterval(window.__catPing);
+    window.__catPing = setInterval(function () { pingWorker(workerUrlOf(b), pill); }, 8000);
+
+    var saveBtn = document.getElementById("saveWorker");
+    if (saveBtn) {
+      saveBtn.addEventListener("click", function () {
+        var s = state();
+        var rec = brandBy(s, b.id);
+        rec.catalogWorkerUrl = (urlInput.value || "").trim().replace(/\/+$/, "");
+        save(s);
+        b = rec;
+        pingWorker(workerUrlOf(b), pill);
+        if (status) status.innerHTML = rec.catalogWorkerUrl
+          ? '<span class="ok">Saved. Checking the worker…</span>'
+          : '<span class="error">Paste the trycloudflare URL from the Colab worker cell.</span>';
+      });
+    }
+
+    var go = document.getElementById("catGo");
+    if (!go) return;
+    go.addEventListener("click", function () {
+      var s = state();
+      var rec = brandBy(s, b.id);
+      var base = workerUrlOf(rec);
+      var person = document.getElementById("filePerson").files[0];
+      var garment = document.getElementById("fileGarment").files[0];
+      if (!base) {
+        status.innerHTML = '<span class="error">Save a Colab worker URL first.</span>';
+        return;
+      }
+      if (!person || !garment) {
+        status.innerHTML = '<span class="error">Add a model photo and a garment photo.</span>';
+        return;
+      }
+      go.disabled = true;
+      status.textContent = "Sending to Colab… this can take 1–3 minutes. You can stay on this page.";
+      var body = new FormData();
+      body.append("person", person);
+      body.append("garment", garment);
+      body.append("category", chipValue("catCategory") || "one-pieces");
+      body.append("garment_photo_type", chipValue("catPhotoType") || "flat-lay");
+      body.append("steps", "20");
+      fetch(base + "/tryon", { method: "POST", body: body })
+        .then(function (r) {
+          if (!r.ok) {
+            return r.text().then(function (t) {
+              throw new Error((t || r.statusText || "try-on failed").slice(0, 240));
+            });
+          }
+          return r.blob();
+        })
+        .then(function (blob) {
+          return new Promise(function (resolve) {
+            var fr = new FileReader();
+            fr.onload = function () { resolve(fr.result); };
+            fr.readAsDataURL(blob);
+          });
+        })
+        .then(function (dataUrl) {
+          var st = state();
+          var brand = brandBy(st, b.id);
+          brand.catalogShots = brand.catalogShots || [];
+          var shot = {
+            id: uid(),
+            url: dataUrl,
+            category: chipValue("catCategory") || "one-pieces",
+            createdAt: Date.now()
+          };
+          brand.catalogShots.push(shot);
+          if (brand.catalogShots.length > 12) brand.catalogShots = brand.catalogShots.slice(-12);
+          save(st);
+          var box = document.getElementById("catResult");
+          if (box) box.innerHTML = '<img src="' + dataUrl + '" alt="result"/>';
+          status.innerHTML = '<span class="ok">Look ready. Saved to this brand’s catalog.</span>';
+          go.disabled = false;
+          render(shell(st, catalogPage(brand)));
+          bindCatalogPage(brand);
+        })
+        .catch(function (err) {
+          go.disabled = false;
+          var msg = (err && err.message) || "Could not reach Colab.";
+          if (msg.indexOf("Failed to fetch") >= 0) {
+            msg = "Could not reach the worker. Confirm the URL, that the Colab cell is still running, and that you allowed this site if the browser asked.";
+          }
+          status.innerHTML = '<span class="error">' + esc(msg) + "</span>";
+        });
+    });
+  }
+
   function bindInbox(b) {
     document.querySelectorAll(".approveForm").forEach(function (form) {
       form.addEventListener("submit", function (e) {
@@ -1112,6 +1305,11 @@
       if (parts[2] === "compose") {
         render(shell(s, compose(b)));
         bindCompose(b);
+        return;
+      }
+      if (parts[2] === "catalog") {
+        render(shell(s, catalogPage(b)));
+        bindCatalogPage(b);
         return;
       }
       if (parts[2] === "inbox") {

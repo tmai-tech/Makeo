@@ -87,6 +87,28 @@ class AppFlow(unittest.TestCase):
         self.assertEqual(job["status"], "awaiting_approval")
         c.close()
 
+    def test_catalog_owner_only(self):
+        from makeo import db
+        self._login("owner@x.test")
+        c = db.connect()
+        owner = c.execute("SELECT id FROM users WHERE email=?",
+                          ("owner@x.test",)).fetchone()
+        bid = db.new_id()
+        c.execute(
+            "INSERT INTO brands (id,user_id,slug,name,config,assets_dir,created_at) "
+            "VALUES (?,?,?,?,?,?,?)",
+            (bid, owner["id"], "cat", "Cat", "{}", self.td.name, db.now()),
+        )
+        c.commit()
+        c.close()
+        r = self.client.get(f"/brands/{bid}/catalog")
+        self.assertEqual(r.status_code, 200)
+        self.assertIn("Colab worker URL", r.text)
+        self.client.get("/logout")
+        self._login("other@x.test")
+        r = self.client.get(f"/brands/{bid}/catalog")
+        self.assertEqual(r.status_code, 404)
+
 
 if __name__ == "__main__":
     unittest.main()

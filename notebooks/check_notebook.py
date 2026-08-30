@@ -22,6 +22,7 @@ MUST_CONTAIN = (
     "T4",
     "one-pieces",
     "flat-lay",
+    "colab_worker.py",
 )
 MUST_NOT_CONTAIN = (
     "FASHN_API_KEY",

@@ -312,6 +312,42 @@ def compose_post(request: Request, brand_id: str,
     return RedirectResponse(f"/brands/{brand_id}/compose", 302)
 
 
+@app.get("/brands/{brand_id}/catalog", response_class=HTMLResponse)
+def catalog_get(request: Request, brand_id: str):
+    user = require_user(request)
+    if not user:
+        return RedirectResponse("/login", 302)
+    c = conn()
+    brand = owned_brand(c, user, brand_id)
+    c.close()
+    if not brand:
+        return HTMLResponse("not found", 404)
+    cfg = json.loads(brand["config"] or "{}")
+    return TEMPLATES.TemplateResponse(
+        request, "catalog.html",
+        ctx(request, user, brand=brand, worker_url=cfg.get("catalog_worker_url") or ""))
+
+
+@app.post("/brands/{brand_id}/catalog")
+def catalog_post(request: Request, brand_id: str,
+                 csrf: str = Form(""), worker_url: str = Form("")):
+    check_csrf(request, csrf)
+    user = require_user(request)
+    if not user:
+        return RedirectResponse("/login", 302)
+    c = conn()
+    brand = owned_brand(c, user, brand_id)
+    if not brand:
+        c.close()
+        return HTMLResponse("not found", 404)
+    cfg = json.loads(brand["config"] or "{}")
+    cfg["catalog_worker_url"] = (worker_url or "").strip().rstrip("/")
+    c.execute("UPDATE brands SET config=? WHERE id=?", (json.dumps(cfg), brand_id))
+    c.commit()
+    c.close()
+    return RedirectResponse(f"/brands/{brand_id}/catalog", 302)
+
+
 # --- PR 10: approve + IG ---
 
 @app.get("/brands/{brand_id}/inbox", response_class=HTMLResponse)

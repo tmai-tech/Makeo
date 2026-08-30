@@ -1,0 +1,75 @@
+{% extends "base.html" %}
+{% block title %}Catalog · {{ brand.name }}{% endblock %}
+{% block body %}
+<h1>Catalog · {{ brand.name }}</h1>
+<p class="mut">Upload a model and a garment. Colab does the GPU work in the background. Keep this page open.</p>
+<form method="post">
+  <input type="hidden" name="csrf" value="{{ csrf }}">
+  <label>Colab worker URL</label>
+  <input name="worker_url" value="{{ worker_url }}" placeholder="https://….trycloudflare.com">
+  <button>Save worker URL</button>
+</form>
+<p class="mut">In Colab: T4 → Run all → run the last <strong>Start worker</strong> cell. Paste the URL here.</p>
+<p>
+  <a class="btn" target="makeo-colab" rel="noopener"
+     href="https://colab.research.google.com/github/tmai-tech/Makeo/blob/explore-catalog-vton/notebooks/fashn_vton_colab.ipynb">Start Colab</a>
+  <a href="/brands/{{ brand.id }}/compose">Back to video</a>
+</p>
+<section class="card">
+  <label>Model photo</label>
+  <input id="filePerson" type="file" accept="image/*">
+  <label>Garment photo</label>
+  <input id="fileGarment" type="file" accept="image/*">
+  <label>Outfit</label>
+  <select id="catCategory">
+    <option value="one-pieces">Saree / anarkali</option>
+    <option value="tops">Kurti / blouse</option>
+    <option value="bottoms">Palazzo / salwar</option>
+  </select>
+  <label>Garment photo type</label>
+  <select id="catPhotoType">
+    <option value="flat-lay">Flat-lay / hanger</option>
+    <option value="model">Already on a person</option>
+  </select>
+  <p><button type="button" id="catGo">Create look</button></p>
+  <p class="mut" id="catStatus"></p>
+  <p id="catResult"></p>
+</section>
+<script>
+(function () {
+  var base = {{ worker_url|tojson }};
+  var go = document.getElementById("catGo");
+  var status = document.getElementById("catStatus");
+  var result = document.getElementById("catResult");
+  go.addEventListener("click", function () {
+    if (!base) { status.textContent = "Save a Colab worker URL first."; return; }
+    var person = document.getElementById("filePerson").files[0];
+    var garment = document.getElementById("fileGarment").files[0];
+    if (!person || !garment) { status.textContent = "Add both photos."; return; }
+    go.disabled = true;
+    status.textContent = "Sending to Colab… 1–3 minutes.";
+    var body = new FormData();
+    body.append("person", person);
+    body.append("garment", garment);
+    body.append("category", document.getElementById("catCategory").value);
+    body.append("garment_photo_type", document.getElementById("catPhotoType").value);
+    body.append("steps", "20");
+    fetch(base.replace(/\/+$/, "") + "/tryon", { method: "POST", body: body })
+      .then(function (r) {
+        if (!r.ok) return r.text().then(function (t) { throw new Error(t.slice(0, 240)); });
+        return r.blob();
+      })
+      .then(function (blob) {
+        var url = URL.createObjectURL(blob);
+        result.innerHTML = '<img src="' + url + '" alt="look" style="max-width:320px;border-radius:12px">';
+        status.textContent = "Look ready.";
+        go.disabled = false;
+      })
+      .catch(function (e) {
+        status.textContent = e.message || "Worker unreachable.";
+        go.disabled = false;
+      });
+  });
+})();
+</script>
+{% endblock %}

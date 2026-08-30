@@ -21,6 +21,13 @@ https://colab.research.google.com/github/tmai-tech/Makeo/blob/<branch-or-sha>/no
 - **File → Save a copy in Drive** as the working copy. That file never sees `git push`.
 - Expect GitHub Actions to “update Colab.” There is no Colab upload API for this. The Action only **validates** the `.ipynb` and prints the URL.
 
+## Catalog page + background Colab
+
+1. Open Colab from Makeo → **Catalog** → Start Colab. T4, Run all, then run **Start worker**.
+2. Copy the `trycloudflare.com` URL into Catalog → Save. The pill should say **Colab worker live**.
+3. Stay on Makeo. Drop a model + garment → **Create look** (1–3 min).
+4. Leave the Colab tab open. The last cell must keep running.
+
 ## From the Makeo generator
 
 Generate → **Start Colab** opens this notebook in a **new tab**. Makeo stays put.
