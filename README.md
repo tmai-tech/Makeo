@@ -8,17 +8,25 @@ Instagram as a Reel.
 Nothing posts without a click. Rejecting publishes nothing.
 
 This repo is the product. The architecture and PR plan live in
-[`DESIGN.md`](DESIGN.md). What actually shipped (PRs 1–12, leftovers, catalog
-lab) is in [`STATUS.md`](STATUS.md). How to prove it: [`tests/README.md`](tests/README.md).
+[`DESIGN.md`](DESIGN.md). What shipped (PRs 1–12, leftovers, catalog lab)
+is in [`STATUS.md`](STATUS.md). A plain-language tour of the whole project
+is in [`HANDOVER.md`](HANDOVER.md).
 
 **Public site (GitHub Pages):** **https://tmai-tech.github.io/Makeo/**
 
 **Easy tutorial (every click):** **https://tmai-tech.github.io/Makeo/#/help**
 
-Walk the live demo there: **Create account → New brand → Instagram → Generate → Inbox (approve or reject)**. Accounts stay in that browser. Real Veo + Instagram still need the clone-and-run worker.
+Walk the live demo there: **Create account → New brand → Instagram → Generate → Inbox (approve or reject)**. Create account is name + email + password on the Makeo server (`uvicorn` on port 8780). Paste that server URL on the login page. Real Veo + Instagram still need the clone-and-run worker.
 
 Same hosting path as the other tmai-tech static apps: `web/` deploys on every
 push to `main` via `.github/workflows/deploy-pages.yml`.
+
+**Catalog try-on lab (FASHN VTON 1.5, Colab T4):** Colab is not deployed to.
+It opens the notebook from this repo. After the file is on `main`, use
+[Open in Colab](https://colab.research.google.com/github/tmai-tech/Makeo/blob/explore-catalog-vton/notebooks/fashn_vton_colab.ipynb)
+or https://tmai-tech.github.io/Makeo/colab/fashn-vton/ .
+Do not keep a Drive copy — it will not update on `git push`. Details in
+[`notebooks/README.md`](notebooks/README.md).
 
 **v1 is waitlisted.** Each brand brings its own Gemini key and Google Flow
 login. Approval is in-app (Discord comes later). The worker is this git
@@ -41,12 +49,18 @@ python -m makeo.enqueue --brand buzzit
 python worker.py
 ```
 
-Site (one API process, port 8780):
+Site (one API process, port 8780). People can create their own account on
+`/signup` or `#/signup`. Operator create still works:
 
 ```
-python -m makeo.create_user you@brand.com 'password'
-python -m uvicorn app.main:app --host 127.0.0.1 --port 8780 --workers 1
+python -m makeo.create_user you@brand.com 'password' 'Ada'
+python -m uvicorn app.main:app --host 0.0.0.0 --port 8780 --workers 1
 ```
+
+On the GitHub Pages app, paste `http://127.0.0.1:8780` (same machine) or
+your HTTPS origin as **Makeo server URL**. For the Pages site on another
+device, the API must be HTTPS and started with
+`MAKEO_COOKIE_SAMESITE=none` (Secure cookies are forced).
 
 Each enqueue copies brand.json + assets into `data/tenants/<slug>/jobs/<id>/`.
 The worker must use only that prefix.
