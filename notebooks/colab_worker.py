@@ -215,7 +215,10 @@ def build_app(pipe):
         return resp
 
     @app.get("/")
-    def root():
+    def root(request: Request):
+        accept = (request.headers.get("accept") or "").lower()
+        if "text/html" in accept:
+            return HTMLResponse(WORKER_UI_HTML)
         return {"ok": True, "service": "makeo-catalog-vton", "ready": pipe is not None}
 
     @app.get("/health")
@@ -225,6 +228,10 @@ def build_app(pipe):
     @app.get("/ui")
     def ui():
         return HTMLResponse(WORKER_UI_HTML)
+
+    @app.post("/")
+    async def tryon_root(request: Request):
+        return await tryon(request)
 
     @app.post("/tryon")
     async def tryon(request: Request):
@@ -418,7 +425,7 @@ def serve(pipe, port: int = PORT) -> str:
         )
     public = urls[0]
     print("\n" + "=" * 60)
-    print("Makeo catalog worker is up. (json-v4)")
+    print("Makeo catalog worker is up. (json-v5)")
     print("PASTE THIS on Makeo → Catalog → Colab worker URL")
     print("(NOT colab.research.google.com, NOT a trycloudflare URL that never loads)")
     print()

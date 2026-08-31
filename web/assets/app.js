@@ -1187,20 +1187,24 @@
   }
 
   function tryonDirect(base, payload) {
-    return fetch(base + "/tryon", {
-      method: "POST",
-      mode: "cors",
-      credentials: "omit",
-      headers: { "Content-Type": "application/json", "Accept": "image/png,application/json" },
-      body: JSON.stringify(payload)
-    }).then(function (r) {
-      if (!r.ok) {
-        return r.text().then(function (t) {
-          throw new Error((t || r.statusText || "try-on failed").slice(0, 240));
-        });
-      }
-      return r.blob();
-    }).then(function (blob) {
+    function post(path) {
+      return fetch(base + path, {
+        method: "POST",
+        mode: "cors",
+        credentials: "omit",
+        headers: { "Content-Type": "application/json", "Accept": "image/png,application/json" },
+        body: JSON.stringify(payload)
+      }).then(function (r) {
+        if (r.status === 404 && path === "/tryon") return post("/");
+        if (!r.ok) {
+          return r.text().then(function (t) {
+            throw new Error((t || r.statusText || "try-on failed").slice(0, 240));
+          });
+        }
+        return r.blob();
+      });
+    }
+    return post("/tryon").then(function (blob) {
       return new Promise(function (resolve, reject) {
         var fr = new FileReader();
         fr.onload = function () { resolve(fr.result); };
@@ -1217,7 +1221,7 @@
         reject(new Error("Worker URL is not valid."));
         return;
       }
-      var w = window.open(base + "/ui", "makeo-colab-worker");
+      var w = window.open(base, "makeo-colab-worker");
       if (!w) {
         reject(new Error("The worker tab was blocked. Allow pop-ups for this site, click Open worker tab, then Create look again."));
         return;
@@ -1229,6 +1233,7 @@
         done = true;
         window.removeEventListener("message", onMsg);
         clearInterval(timer);
+        clearTimeout(readyWait);
         clearTimeout(limit);
         if (err) reject(err);
         else resolve(dataUrl);
@@ -1238,6 +1243,7 @@
         var d = e.data || {};
         if ((d.type === "worker-ui-ready" || d.type === "pong") && !sent) {
           sent = true;
+          clearTimeout(readyWait);
           w.postMessage({ type: "tryon", payload: payload }, origin);
           return;
         }
@@ -1250,8 +1256,13 @@
       var timer = setInterval(function () {
         try { w.postMessage({ type: "ping" }, origin); } catch (e) {}
       }, 800);
+      var readyWait = setTimeout(function () {
+        if (!sent) {
+          finish(new Error("This Colab worker is the old JSON page. In Colab: stop only the worker cell, run it again, wait for (json-v5), paste the new colab.dev URL, Save, then Create look. Do not add /ui."));
+        }
+      }, 15000);
       var limit = setTimeout(function () {
-        finish(new Error("Worker tab did not respond. If it shows {\"detail\":\"Not Found\"}, that Colab worker is too old. In Colab stop only the worker cell, run it again, wait for (json-v4), paste the new URL, then try again."));
+        finish(new Error("Colab did not return a look in time. Keep the worker tab and the Colab notebook open and try again."));
       }, 4 * 60 * 1000);
     });
   }
@@ -1320,7 +1331,7 @@
         if (status) {
           var hint = typed.toLowerCase().indexOf("trycloudflare.com") >= 0
             ? '<span class="error">Saved, but trycloudflare often shows error 1033. Paste the <code>colab.dev</code> URL that already loads JSON, then Save again.</span>'
-            : '<span class="ok">Saved. The new tab should show <code>{"ok":true}</code>. Then drop photos and Create look. Leave Colab running.</span>';
+            : '<span class="ok">Saved. Leave that worker tab open. Drop photos and Create look.</span>';
           status.innerHTML = hint;
         }
       });
