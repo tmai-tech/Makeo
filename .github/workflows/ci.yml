@@ -1,0 +1,45 @@
+# Merge gate for main. Required check name: "unit-and-integration".
+# GitHub → Settings → Branches → main → require this status check.
+name: CI
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  unit-and-integration:
+    name: unit-and-integration
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install test dependencies
+        run: |
+          if [ -f requirements-test.txt ]; then
+            pip install -r requirements-test.txt
+          else
+            pip install fastapi uvicorn jinja2 cryptography argon2-cffi python-multipart itsdangerous httpx
+          fi
+
+      - name: Compile
+        run: python -m compileall -q -x '[/\\](\.venv|legacy)[/\\]' .
+
+      - name: Unit + integration + proof pipeline
+        env:
+          MAKEO_MASTER_KEY: "unused-overridden-in-tests"
+        run: python -m unittest discover -s tests -q

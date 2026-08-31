@@ -1,22 +1,11 @@
+# Kept so older links keep working. The merge gate is ci.yml.
 name: Tests
 
 on:
-  push:
-    branches: [main, feat/test-proof-suite, explore-catalog-vton]
-  pull_request:
   workflow_dispatch:
 
 jobs:
-  unit-and-integration:
+  redirect:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
-        with:
-          python-version: "3.12"
-      - name: Install
-        run: pip install -r requirements-test.txt
-      - name: Unit + integration
-        env:
-          MAKEO_MASTER_KEY: "unused-overridden-in-tests"
-        run: python -m unittest discover -s tests -q
+      - run: echo "Use the CI workflow (unit-and-integration) — it runs on every PR to main."

@@ -27,3 +27,12 @@ python -m venv .venv
 | `test_app.py` / `test_integration_http.py` | integration | login, CSRF, compose, approve/reject/retry, owner isolation |
 | `test_bot_parse.py` | unit | `makeo:{id}:approve` |
 | `test_proof_pipeline.py` | proof | queued → awaiting_approval → posted with override caption |
+
+## CI (must pass before merge to `main`)
+
+`.github/workflows/ci.yml` runs on every **pull request into `main`** and on
+every push to `main`. The check name is **unit-and-integration**.
+
+To block merge until it is green: GitHub → Settings → Rules → Rulesets
+(or Branches → Branch protection) → `main` → Require status checks to
+pass → add `unit-and-integration`.
