@@ -219,7 +219,7 @@ WORKER_UI_HTML = """<!DOCTYPE html>
   <script>
   function allowed(origin) {
     if (!origin) return false;
-    if (origin === "https://tmai-tech.github.io") return true;
+    if (/^https:\\/\\/([a-z0-9-]+\\.)?github\\.io$/i.test(origin)) return true;
     return /^https?:\\/\\/(localhost|127\\.0\\.0\\.1)(:\\d+)?$/.test(origin);
   }
   function say(t, cls) {
@@ -298,7 +298,7 @@ def build_app(pipe):
     @app.get("/")
     def root(request: Request):
         accept = (request.headers.get("accept") or "").lower()
-        if "text/html" in accept:
+        if "text/html" in accept or request.query_params.get("ui"):
             return HTMLResponse(WORKER_UI_HTML)
         return {"ok": True, "service": "makeo-catalog-vton", "ready": pipe is not None}
 

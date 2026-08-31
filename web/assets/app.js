@@ -1244,6 +1244,11 @@
     });
   }
 
+  function usesColabProxy(url) {
+    var low = String(url || "").toLowerCase();
+    return low.indexOf("colab.dev") >= 0 || low.indexOf("googleusercontent.com") >= 0;
+  }
+
   function tryonViaWorkerUi(base, payload) {
     return new Promise(function (resolve, reject) {
       var origin;
@@ -1251,11 +1256,13 @@
         reject(new Error("Worker URL is not valid."));
         return;
       }
-      var w = window.open(base, "makeo-colab-worker");
+      var uiUrl = base + "/ui?t=" + Date.now();
+      var w = window.open(uiUrl, "makeo-colab-ui");
       if (!w) {
-        reject(new Error("The worker tab was blocked. Allow pop-ups for this site, click Open worker tab, then Create look again."));
+        reject(new Error("The worker tab was blocked. Allow pop-ups for this site, then Create look again."));
         return;
       }
+      try { w.location.href = uiUrl; } catch (e) {}
       var done = false;
       var sent = false;
       function finish(err, dataUrl) {
@@ -1288,9 +1295,9 @@
       }, 800);
       var readyWait = setTimeout(function () {
         if (!sent) {
-          finish(new Error("This Colab worker is the old JSON page. In Colab: stop only the worker cell, run it again, wait for (json-v5), paste the new colab.dev URL, Save, then Create look. Do not add /ui."));
+          finish(new Error("The worker tab did not start. It must say “Waiting for Makeo”. If you see JSON or Not Found, in Colab stop only the worker cell, run it again, wait for (json-v6), paste the new URL, allow pop-ups, then Create look."));
         }
-      }, 15000);
+      }, 20000);
       var limit = setTimeout(function () {
         finish(new Error("Colab did not return a look in time. Keep the worker tab and the Colab notebook open and try again."));
       }, 4 * 60 * 1000);
@@ -1425,7 +1432,9 @@
         return;
       }
       go.disabled = true;
-      status.textContent = "Sending to Colab… this can take 1–3 minutes.";
+      status.textContent = usesColabProxy(base)
+        ? "Opening the worker tab… it should say Waiting for Makeo, then Creating look (1–3 min). Allow pop-ups."
+        : "Sending to Colab… this can take 1–3 minutes.";
       Promise.all([
         fileToDataUrl(person, 1280),
         fileToDataUrl(garment, 1280),
@@ -1440,14 +1449,16 @@
             garment_photo_type: chipValue("catPhotoType") || "flat-lay",
             steps: 20
           };
-          return tryonDirect(base, payload).catch(function (err) {
-            var msg = (err && err.message) || "";
-            if (msg.indexOf("Failed to fetch") >= 0 || msg.indexOf("NetworkError") >= 0 || msg.indexOf("Load failed") >= 0) {
-              status.textContent = "Direct call blocked; trying the worker tab…";
-              return tryonViaWorkerUi(base, payload);
-            }
-            throw err;
-          }).then(function (dataUrl) {
+          var send = usesColabProxy(base)
+            ? tryonViaWorkerUi(base, payload)
+            : tryonDirect(base, payload).catch(function (err) {
+                var msg = (err && err.message) || "";
+                if (msg.indexOf("Failed to fetch") >= 0 || msg.indexOf("NetworkError") >= 0 || msg.indexOf("Load failed") >= 0) {
+                  return tryonViaWorkerUi(base, payload);
+                }
+                throw err;
+              });
+          return send.then(function (dataUrl) {
             return { dataUrl: dataUrl, payload: payload, person: imgs[2], garment: imgs[3] };
           });
         })
