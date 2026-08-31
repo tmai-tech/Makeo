@@ -138,6 +138,12 @@ Buzzit local path with no flags still works: `python daily.py --public`
 
 ---
 
+## Test slice (`feat/test-proof-suite`)
+
+Unit + integration + a full-proof pipeline live under `tests/`.
+Run: `python -m unittest discover -s tests -q` (see `tests/README.md`).
+CI: `.github/workflows/tests.yml`.
+
 ## What “done” means
 
 - **Design plan PRs 1–12:** done on `main`. Do not re-implement them.

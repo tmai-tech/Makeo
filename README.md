@@ -9,7 +9,7 @@ Nothing posts without a click. Rejecting publishes nothing.
 
 This repo is the product. The architecture and PR plan live in
 [`DESIGN.md`](DESIGN.md). What actually shipped (PRs 1–12, leftovers, catalog
-lab) is in [`STATUS.md`](STATUS.md).
+lab) is in [`STATUS.md`](STATUS.md). How to prove it: [`tests/README.md`](tests/README.md).
 
 **Public site (GitHub Pages):** **https://tmai-tech.github.io/Makeo/**
 

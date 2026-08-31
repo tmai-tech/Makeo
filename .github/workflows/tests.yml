@@ -1,0 +1,11 @@
+# Kept so older links keep working. The merge gate is ci.yml.
+name: Tests
+
+on:
+  workflow_dispatch:
+
+jobs:
+  redirect:
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo "Use the CI workflow (unit-and-integration) — it runs on every PR to main."
