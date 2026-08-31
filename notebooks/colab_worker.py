@@ -8,8 +8,6 @@ Run only after `pipe` is loaded in the notebook:
 Prints a https://….trycloudflare.com URL. Paste that on Makeo → Catalog.
 Leave this cell running. Do not close the Colab tab.
 """
-from __future__ import annotations
-
 import base64
 import io
 import re
@@ -44,6 +42,40 @@ def decode_image_field(value: str) -> bytes:
     if len(data) > MAX_IMAGE_BYTES:
         raise ValueError("image too large (keep under 10 MB)")
     return data
+
+
+def parse_tryon_payload(data):
+    """Pull person/garment bytes out of a JSON object. No FastAPI types."""
+    if not isinstance(data, dict):
+        raise ValueError("JSON object required")
+    person = data.get("person")
+    garment = data.get("garment")
+    if not person or not garment:
+        raise ValueError("person and garment images are required")
+    category = data.get("category") or "one-pieces"
+    photo_type = data.get("garment_photo_type") or "flat-lay"
+    if category not in ("tops", "bottoms", "one-pieces"):
+        raise ValueError("category must be tops, bottoms, or one-pieces")
+    if photo_type not in ("flat-lay", "model"):
+        raise ValueError("garment_photo_type must be flat-lay or model")
+    try:
+        steps = max(10, min(int(data.get("steps", 20)), 50))
+    except (TypeError, ValueError) as e:
+        raise ValueError("steps must be a number") from e
+    try:
+        guidance = float(data.get("guidance", 1.5))
+        seed = int(data.get("seed", 42))
+    except (TypeError, ValueError) as e:
+        raise ValueError("guidance and seed must be numbers") from e
+    return {
+        "person": decode_image_field(str(person)),
+        "garment": decode_image_field(str(garment)),
+        "category": category,
+        "garment_photo_type": photo_type,
+        "steps": steps,
+        "guidance": guidance,
+        "seed": seed,
+    }
 
 
 def _free_port(start: int = PORT) -> int:
@@ -86,19 +118,9 @@ def _open_image(data: bytes):
 
 
 def build_app(pipe):
-    from fastapi import FastAPI, HTTPException
+    from fastapi import FastAPI, HTTPException, Request
     from fastapi.middleware.cors import CORSMiddleware
     from fastapi.responses import JSONResponse, Response
-    from pydantic import BaseModel
-
-    class TryOnBody(BaseModel):
-        person: str
-        garment: str
-        category: str = "one-pieces"
-        garment_photo_type: str = "flat-lay"
-        steps: int = 20
-        guidance: float = 1.5
-        seed: int = 42
 
     app = FastAPI(title="Makeo catalog worker")
     app.add_middleware(
@@ -127,34 +149,31 @@ def build_app(pipe):
         return {"ok": True, "ready": pipe is not None}
 
     @app.post("/tryon")
-    async def tryon(body: TryOnBody):
-        if body.category not in ("tops", "bottoms", "one-pieces"):
-            raise HTTPException(400, "category must be tops, bottoms, or one-pieces")
-        if body.garment_photo_type not in ("flat-lay", "model"):
-            raise HTTPException(400, "garment_photo_type must be flat-lay or model")
+    async def tryon(request: Request):
         try:
-            person_b = decode_image_field(body.person)
-            garment_b = decode_image_field(body.garment)
+            data = await request.json()
+        except Exception:
+            raise HTTPException(400, "expected a JSON body with person and garment")
+        try:
+            payload = parse_tryon_payload(data)
+            person_im = _open_image(payload["person"])
+            garment_im = _open_image(payload["garment"])
         except ValueError as e:
             raise HTTPException(400, f"could not read images: {e}") from e
-        try:
-            person_im = _open_image(person_b)
-            garment_im = _open_image(garment_b)
         except Exception as e:
             raise HTTPException(400, f"could not read images: {e}") from e
-        steps = max(10, min(int(body.steps), 50))
         if not lock.acquire(blocking=False):
             raise HTTPException(429, "worker is busy — try again in a minute")
         try:
             result = pipe(
                 person_image=person_im,
                 garment_image=garment_im,
-                category=body.category,
-                garment_photo_type=body.garment_photo_type,
+                category=payload["category"],
+                garment_photo_type=payload["garment_photo_type"],
                 num_samples=1,
-                num_timesteps=steps,
-                guidance_scale=float(body.guidance),
-                seed=int(body.seed),
+                num_timesteps=payload["steps"],
+                guidance_scale=payload["guidance"],
+                seed=payload["seed"],
                 segmentation_free=True,
             )
             image = result.images[0]
@@ -221,7 +240,7 @@ def serve(pipe, port: int = PORT) -> str:
     time.sleep(1.2)
     public = _tunnel(port)
     print("\n" + "=" * 60)
-    print("Makeo catalog worker is up.")
+    print("Makeo catalog worker is up. (json-v2)")
     print("PASTE THIS on Makeo → Catalog → Colab worker URL")
     print("(NOT colab.research.google.com)")
     print()
