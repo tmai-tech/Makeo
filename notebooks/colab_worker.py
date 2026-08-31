@@ -273,31 +273,67 @@ def build_app(pipe):
     return app
 
 
-def _tunnel(port: int) -> str:
-    bin_path = _ensure_cloudflared()
-    proc = subprocess.Popen(
-        [str(bin_path), "tunnel", "--no-autoupdate", "--url", f"http://127.0.0.1:{port}"],
-        stdout=subprocess.PIPE,
-        stderr=subprocess.STDOUT,
-        text=True,
+def _health_ok(url: str, timeout: float = 8.0) -> bool:
+    try:
+        with urllib.request.urlopen(url.rstrip("/") + "/health", timeout=timeout) as resp:
+            return 200 <= resp.status < 300
+    except Exception:
+        return False
+
+
+def _kill_stale_cloudflared() -> None:
+    subprocess.call(
+        ["pkill", "-f", "/tmp/cloudflared"],
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
     )
-    url = None
+
+
+def _read_url(proc, pattern: str, seconds: float):
     assert proc.stdout is not None
-    deadline = time.time() + 45
+    deadline = time.time() + seconds
     while time.time() < deadline:
         line = proc.stdout.readline()
         if not line:
             if proc.poll() is not None:
-                break
+                return None
             continue
         print(line.rstrip())
-        m = re.search(r"https://[a-z0-9-]+\.trycloudflare\.com", line)
+        m = re.search(pattern, line)
         if m:
-            url = m.group(0)
-            break
+            threading.Thread(target=proc.stdout.read, daemon=True).start()
+            return m.group(0)
+    return None
+
+
+def _tunnel(port: int):
+    """Return a trycloudflare URL only if /health answers. These tunnels often print a URL and then die."""
+    try:
+        bin_path = _ensure_cloudflared()
+        proc = subprocess.Popen(
+            [
+                str(bin_path),
+                "tunnel",
+                "--no-autoupdate",
+                "--edge-ip-version",
+                "4",
+                "--url",
+                f"http://127.0.0.1:{port}",
+            ],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
+        )
+        url = _read_url(proc, r"https://[a-z0-9-]+\.trycloudflare\.com", 35)
+    except Exception as e:
+        print("cloudflared failed:", e)
+        return None
     if not url:
-        raise RuntimeError("cloudflared did not print a public URL")
-    threading.Thread(target=proc.stdout.read, daemon=True).start()
+        print("cloudflared did not print a public URL")
+        return None
+    if not _health_ok(url, timeout=10):
+        print("trycloudflare printed", url, "but /health never answered — ignoring it")
+        return None
     return url
 
 
@@ -314,6 +350,51 @@ def _colab_proxy(port: int):
     return (url or "").rstrip("/") or None
 
 
+def _localhost_run(port: int):
+    try:
+        proc = subprocess.Popen(
+            [
+                "ssh",
+                "-o",
+                "StrictHostKeyChecking=no",
+                "-o",
+                "ExitOnForwardFailure=yes",
+                "-o",
+                "ServerAliveInterval=30",
+                "-R",
+                "80:127.0.0.1:%d" % port,
+                "nokey@localhost.run",
+            ],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
+        )
+    except Exception as e:
+        print("localhost.run ssh failed:", e)
+        return None
+    url = _read_url(proc, r"https://[A-Za-z0-9.-]+\.(localhost\.run|lhr\.life)", 35)
+    if url:
+        print("localhost.run:", url)
+    return url
+
+
+def _public_urls(port: int):
+    urls = []
+    colab = _colab_proxy(port)
+    if colab:
+        print("Colab proxy:", colab)
+        urls.append(colab)
+        return urls
+    print("No Colab proxy — trying other tunnels")
+    extra = _localhost_run(port)
+    if extra and extra not in urls:
+        urls.append(extra)
+    cf = _tunnel(port)
+    if cf and cf not in urls:
+        urls.append(cf)
+    return urls
+
+
 def serve(pipe, port: int = PORT) -> str:
     """Start the worker. Blocks (keep the Colab cell running). Returns the public URL."""
     if pipe is None:
@@ -321,6 +402,7 @@ def serve(pipe, port: int = PORT) -> str:
     _ensure_web()
     import uvicorn
 
+    _kill_stale_cloudflared()
     app = build_app(pipe)
     port = _free_port(port)
     thread = threading.Thread(
@@ -329,21 +411,22 @@ def serve(pipe, port: int = PORT) -> str:
     )
     thread.start()
     time.sleep(1.2)
-    public = _tunnel(port)
-    colab_url = _colab_proxy(port)
+    urls = _public_urls(port)
+    if not urls:
+        raise RuntimeError(
+            "No public URL. Re-run this cell. Prefer the googleusercontent.com line if Colab printed one."
+        )
+    public = urls[0]
     print("\n" + "=" * 60)
-    print("Makeo catalog worker is up. (json-v3)")
+    print("Makeo catalog worker is up. (json-v4)")
     print("PASTE THIS on Makeo → Catalog → Colab worker URL")
-    print("(NOT colab.research.google.com)")
+    print("(NOT colab.research.google.com, NOT a trycloudflare URL that never loads)")
     print()
     print(" ", public)
-    if colab_url:
-        print()
-        print(" ALTERNATE if the first URL is blocked by Cloudflare:")
-        print(" ", colab_url)
+    for alt in urls[1:]:
+        print(" also:", alt)
     print()
     print("Leave this cell running. Keep this Colab tab open.")
-    print("If Makeo still cannot reach the worker, you are on an old cell — stop this cell and run it again.")
     print("=" * 60 + "\n")
     try:
         while True:

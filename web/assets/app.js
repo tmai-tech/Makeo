@@ -1051,11 +1051,11 @@
   function workerUrlError(raw) {
     var u = cleanWorkerUrl(raw);
     if (!u) {
-      return "Paste the URL Colab printed after Start worker — it looks like https://random-words.trycloudflare.com";
+      return "Paste the URL Colab printed after Start worker — googleusercontent.com, or a trycloudflare URL that actually loads.";
     }
     var low = u.toLowerCase();
     if (low.indexOf("colab.research.google.com") >= 0 || low.indexOf("colab.google.com") >= 0) {
-      return "That is the Colab notebook tab, not the worker. Copy the https://….trycloudflare.com line from the last Colab cell.";
+      return "That is the Colab notebook tab, not the worker. Copy the googleusercontent.com (or working tunnel) URL the last cell printed.";
     }
     if (low.indexOf("github.com") >= 0 || low.indexOf("githubusercontent.com") >= 0) {
       return "That is a GitHub link. You need the trycloudflare.com URL printed by the Colab worker cell.";
@@ -1100,7 +1100,7 @@
       '<a class="btn ghost" id="openWorker" target="makeo-worker-ui" rel="noopener" href="#">Open worker tab</a>' +
       '<button type="button" class="btn ghost" id="startColab">Start Colab</button>' +
       "</div>" +
-      '<p class="muted">Paste the <code>https://….trycloudflare.com</code> line Colab printed. Click <strong>Save</strong>. In the worker tab, click through Cloudflare until you see <strong>Waiting for Makeo</strong>. Then Create look here. Keep both tabs open.</p>' +
+      '<p class="muted">Paste the URL Colab labeled <strong>PASTE THIS</strong>. Prefer <code>googleusercontent.com</code> if trycloudflare never loads. Save, allow the worker tab, then Create look.</p>' +
       '<div class="cat-grid">' +
       '<div><label>Model</label><div class="drop" id="dropPerson"><span class="hint">Indian model · full body or 3/4</span>' +
       '<input type="file" id="filePerson" accept="image/*"/></div></div>' +

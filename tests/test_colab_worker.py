@@ -53,6 +53,9 @@ class WorkerUiPage(unittest.TestCase):
         self.assertIn("postMessage", html)
         self.assertIn("tmai-tech.github.io", html)
 
+    def test_dead_url_is_unhealthy(self):
+        self.assertFalse(colab_worker._health_ok("http://127.0.0.1:9", timeout=0.2))
+
 
 if __name__ == "__main__":
     unittest.main()
