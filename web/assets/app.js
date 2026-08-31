@@ -1065,7 +1065,9 @@
       low.indexOf("ngrok") >= 0 ||
       low.indexOf("loca.lt") >= 0 ||
       low.indexOf("googleusercontent.com") >= 0 ||
-      low.indexOf("gradio.live") >= 0
+      low.indexOf("gradio.live") >= 0 ||
+      low.indexOf("localhost.run") >= 0 ||
+      low.indexOf("lhr.life") >= 0
     );
     if (!okHost) {
       return "This does not look like a tunnel URL. It must be https://….trycloudflare.com from the Colab worker cell output.";
@@ -1095,10 +1097,10 @@
       '<div class="row worker-row">' +
       '<input id="workerUrl" placeholder="https://….trycloudflare.com" value="' + esc(b.catalogWorkerUrl || "") + '"/>' +
       '<button type="button" class="btn ghost" id="saveWorker">Save</button>' +
-      '<a class="btn ghost" id="openWorker" target="_blank" rel="noopener" href="#">Open worker once</a>' +
+      '<a class="btn ghost" id="openWorker" target="makeo-worker-ui" rel="noopener" href="#">Open worker tab</a>' +
       '<button type="button" class="btn ghost" id="startColab">Start Colab</button>' +
       "</div>" +
-      '<p class="muted">Paste the <code>https://….trycloudflare.com</code> line Colab printed. Click <strong>Save</strong>, then in the new tab click through any Cloudflare warning until you see <code>{"ok":true}</code>. Come back here and Create look. Keep Colab open.</p>' +
+      '<p class="muted">Paste the <code>https://….trycloudflare.com</code> line Colab printed. Click <strong>Save</strong>. In the worker tab, click through Cloudflare until you see <strong>Waiting for Makeo</strong>. Then Create look here. Keep both tabs open.</p>' +
       '<div class="cat-grid">' +
       '<div><label>Model</label><div class="drop" id="dropPerson"><span class="hint">Indian model · full body or 3/4</span>' +
       '<input type="file" id="filePerson" accept="image/*"/></div></div>' +
@@ -1179,6 +1181,52 @@
       "then come back and try Create look again. Do not restart Colab.</span>";
   }
 
+  function tryonViaWorkerUi(base, payload) {
+    return new Promise(function (resolve, reject) {
+      var origin;
+      try { origin = new URL(base).origin; } catch (e) {
+        reject(new Error("Worker URL is not valid."));
+        return;
+      }
+      var w = window.open(base + "/ui", "makeo-worker-ui");
+      if (!w) {
+        reject(new Error("The worker tab was blocked. Allow pop-ups for this site, click Open worker tab, then Create look again."));
+        return;
+      }
+      var done = false;
+      var sent = false;
+      function finish(err, dataUrl) {
+        if (done) return;
+        done = true;
+        window.removeEventListener("message", onMsg);
+        clearInterval(timer);
+        clearTimeout(limit);
+        if (err) reject(err);
+        else resolve(dataUrl);
+      }
+      function onMsg(e) {
+        if (e.origin !== origin) return;
+        var d = e.data || {};
+        if ((d.type === "worker-ui-ready" || d.type === "pong") && !sent) {
+          sent = true;
+          w.postMessage({ type: "tryon", payload: payload }, origin);
+          return;
+        }
+        if (d.type === "result") {
+          if (d.ok && d.dataUrl) finish(null, d.dataUrl);
+          else finish(new Error(d.error || "try-on failed"));
+        }
+      }
+      window.addEventListener("message", onMsg);
+      var timer = setInterval(function () {
+        try { w.postMessage({ type: "ping" }, origin); } catch (e) {}
+      }, 800);
+      var limit = setTimeout(function () {
+        finish(new Error("Timed out waiting for the worker tab. Click through Cloudflare until you see “Waiting for Makeo”, keep that tab open, then try again."));
+      }, 4 * 60 * 1000);
+    });
+  }
+
   function fileToDataUrl(file, maxEdge) {
     return new Promise(function (resolve, reject) {
       var img = new Image();
@@ -1219,7 +1267,7 @@
     var openBtn = document.getElementById("openWorker");
     function syncOpen() {
       var u = cleanWorkerUrl(urlInput && urlInput.value);
-      if (openBtn) openBtn.href = u || "#";
+      if (openBtn) openBtn.href = u ? u + "/ui" : "#";
     }
     if (urlInput) urlInput.addEventListener("input", syncOpen);
     syncOpen();
@@ -1239,9 +1287,9 @@
         b = rec;
         syncOpen();
         pingWorker(workerUrlOf(b), pill);
-        try { window.open(typed, "makeo-worker"); } catch (e) {}
+        try { window.open(typed + "/ui", "makeo-worker-ui"); } catch (e) {}
         if (status) {
-          status.innerHTML = '<span class="ok">Saved. Finish the new tab: click through Cloudflare until you see <code>{"ok":true}</code>, then Create look here.</span>';
+          status.innerHTML = '<span class="ok">Saved. In the worker tab, click through Cloudflare until you see <strong>Waiting for Makeo</strong>, then Create look here.</span>';
         }
       });
     }
@@ -1264,36 +1312,15 @@
         return;
       }
       go.disabled = true;
-      status.textContent = "Sending to Colab… this can take 1–3 minutes. You can stay on this page.";
+      status.textContent = "Sending to Colab through the worker tab… 1–3 minutes. Click through Cloudflare there if it appears.";
       Promise.all([fileToDataUrl(person, 1280), fileToDataUrl(garment, 1280)])
         .then(function (pair) {
-          return fetch(base + "/tryon", {
-            method: "POST",
-            mode: "cors",
-            credentials: "omit",
-            headers: { "Content-Type": "application/json", "Accept": "image/png,application/json" },
-            body: JSON.stringify({
-              person: pair[0],
-              garment: pair[1],
-              category: chipValue("catCategory") || "one-pieces",
-              garment_photo_type: chipValue("catPhotoType") || "flat-lay",
-              steps: 20
-            })
-          });
-        })
-        .then(function (r) {
-          if (!r.ok) {
-            return r.text().then(function (t) {
-              throw new Error((t || r.statusText || "try-on failed").slice(0, 240));
-            });
-          }
-          return r.blob();
-        })
-        .then(function (blob) {
-          return new Promise(function (resolve) {
-            var fr = new FileReader();
-            fr.onload = function () { resolve(fr.result); };
-            fr.readAsDataURL(blob);
+          return tryonViaWorkerUi(base, {
+            person: pair[0],
+            garment: pair[1],
+            category: chipValue("catCategory") || "one-pieces",
+            garment_photo_type: chipValue("catPhotoType") || "flat-lay",
+            steps: 20
           });
         })
         .then(function (dataUrl) {

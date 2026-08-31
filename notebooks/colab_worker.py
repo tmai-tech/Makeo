@@ -117,10 +117,84 @@ def _open_image(data: bytes):
     return Image.open(io.BytesIO(data)).convert("RGB")
 
 
+# Served at /ui. Makeo talks to this tab with postMessage so the browser
+# does not have to CORS-fetch trycloudflare.com (Cloudflare blocks that).
+WORKER_UI_HTML = """<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1"/>
+  <title>Makeo catalog worker</title>
+  <style>
+    body { font: 16px/1.45 system-ui, sans-serif; background: #111; color: #eee; margin: 2rem; }
+    code { color: #e8b84b; }
+    .ok { color: #6d6; }
+    .bad { color: #f88; }
+  </style>
+</head>
+<body>
+  <p id="s">Waiting for Makeo… keep this tab open.</p>
+  <p>Cloudflare is done when you can read this page. Go back to Makeo and click <strong>Create look</strong>.</p>
+  <script>
+  function allowed(origin) {
+    if (!origin) return false;
+    if (origin === "https://tmai-tech.github.io") return true;
+    return /^https?:\\/\\/(localhost|127\\.0\\.0\\.1)(:\\d+)?$/.test(origin);
+  }
+  function say(t, cls) {
+    var el = document.getElementById("s");
+    el.textContent = t;
+    el.className = cls || "";
+  }
+  window.addEventListener("message", function (e) {
+    if (!allowed(e.origin)) return;
+    var d = e.data || {};
+    if (d.type === "ping") {
+      e.source.postMessage({ type: "pong", ready: true }, e.origin);
+      return;
+    }
+    if (d.type !== "tryon" || !d.payload) return;
+    say("Creating look… 1–3 minutes. Leave this tab open.");
+    fetch("/tryon", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(d.payload)
+    }).then(function (r) {
+      if (!r.ok) {
+        return r.text().then(function (t) {
+          throw new Error((t || r.statusText || "try-on failed").slice(0, 240));
+        });
+      }
+      return r.blob();
+    }).then(function (blob) {
+      return new Promise(function (resolve, reject) {
+        var fr = new FileReader();
+        fr.onload = function () { resolve(fr.result); };
+        fr.onerror = reject;
+        fr.readAsDataURL(blob);
+      });
+    }).then(function (dataUrl) {
+      e.source.postMessage({ type: "result", ok: true, dataUrl: dataUrl }, e.origin);
+      say("Look sent back to Makeo. You can leave this tab open.", "ok");
+    }).catch(function (err) {
+      var msg = (err && err.message) || String(err);
+      e.source.postMessage({ type: "result", ok: false, error: msg }, e.origin);
+      say(msg, "bad");
+    });
+  });
+  if (window.opener) {
+    try { window.opener.postMessage({ type: "worker-ui-ready" }, "*"); } catch (err) {}
+  }
+  </script>
+</body>
+</html>
+"""
+
+
 def build_app(pipe):
     from fastapi import FastAPI, HTTPException, Request
     from fastapi.middleware.cors import CORSMiddleware
-    from fastapi.responses import JSONResponse, Response
+    from fastapi.responses import HTMLResponse, JSONResponse, Response
 
     app = FastAPI(title="Makeo catalog worker")
     app.add_middleware(
@@ -147,6 +221,10 @@ def build_app(pipe):
     @app.get("/health")
     def health():
         return {"ok": True, "ready": pipe is not None}
+
+    @app.get("/ui")
+    def ui():
+        return HTMLResponse(WORKER_UI_HTML)
 
     @app.post("/tryon")
     async def tryon(request: Request):
@@ -223,6 +301,19 @@ def _tunnel(port: int) -> str:
     return url
 
 
+def _colab_proxy(port: int):
+    try:
+        from google.colab.output import eval_js
+    except ImportError:
+        return None
+    try:
+        url = eval_js("google.colab.kernel.proxyPort(%d)" % int(port))
+    except Exception as e:
+        print("Colab proxy URL not available:", e)
+        return None
+    return (url or "").rstrip("/") or None
+
+
 def serve(pipe, port: int = PORT) -> str:
     """Start the worker. Blocks (keep the Colab cell running). Returns the public URL."""
     if pipe is None:
@@ -239,12 +330,17 @@ def serve(pipe, port: int = PORT) -> str:
     thread.start()
     time.sleep(1.2)
     public = _tunnel(port)
+    colab_url = _colab_proxy(port)
     print("\n" + "=" * 60)
-    print("Makeo catalog worker is up. (json-v2)")
+    print("Makeo catalog worker is up. (json-v3)")
     print("PASTE THIS on Makeo → Catalog → Colab worker URL")
     print("(NOT colab.research.google.com)")
     print()
     print(" ", public)
+    if colab_url:
+        print()
+        print(" ALTERNATE if the first URL is blocked by Cloudflare:")
+        print(" ", colab_url)
     print()
     print("Leave this cell running. Keep this Colab tab open.")
     print("If Makeo still cannot reach the worker, you are on an old cell — stop this cell and run it again.")

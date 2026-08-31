@@ -45,5 +45,14 @@ class ParseTryonPayload(unittest.TestCase):
             parse_tryon_payload({"person": "xxxx"})
 
 
+class WorkerUiPage(unittest.TestCase):
+    def test_bridge_page(self):
+        html = colab_worker.WORKER_UI_HTML
+        self.assertIn("Waiting for Makeo", html)
+        self.assertIn("/tryon", html)
+        self.assertIn("postMessage", html)
+        self.assertIn("tmai-tech.github.io", html)
+
+
 if __name__ == "__main__":
     unittest.main()
