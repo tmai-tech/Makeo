@@ -1105,7 +1105,7 @@
       '<a class="btn ghost" id="openWorker" target="makeo-colab-worker" rel="noopener" href="#">Open worker tab</a>' +
       '<button type="button" class="btn ghost" id="startColab">Start Colab</button>' +
       "</div>" +
-      '<p class="muted">Paste the <code>https://….colab.dev</code> URL that shows <code>{"ok":true}</code>. Do not use a trycloudflare link if that tab shows Cloudflare error 1033. Save, then Create look.</p>' +
+      '<p class="muted">Paste the <code>https://….colab.dev</code> URL that shows <code>{"ok":true}</code> — no <code>/ui</code> on the end. Save should open that same JSON. Then Create look.</p>' +
       '<div class="cat-grid">' +
       '<div><label>Model</label><div class="drop" id="dropPerson"><span class="hint">Indian model · full body or 3/4</span>' +
       '<input type="file" id="filePerson" accept="image/*"/></div></div>' +
@@ -1184,6 +1184,30 @@
       'Open <a href="' + esc(url) + '" target="_blank" rel="noopener">' + esc(url) + "</a> " +
       "in a new tab, click through the warning until you see JSON like <code>{\"ok\":true}</code>, " +
       "then come back and try Create look again. Do not restart Colab.</span>";
+  }
+
+  function tryonDirect(base, payload) {
+    return fetch(base + "/tryon", {
+      method: "POST",
+      mode: "cors",
+      credentials: "omit",
+      headers: { "Content-Type": "application/json", "Accept": "image/png,application/json" },
+      body: JSON.stringify(payload)
+    }).then(function (r) {
+      if (!r.ok) {
+        return r.text().then(function (t) {
+          throw new Error((t || r.statusText || "try-on failed").slice(0, 240));
+        });
+      }
+      return r.blob();
+    }).then(function (blob) {
+      return new Promise(function (resolve, reject) {
+        var fr = new FileReader();
+        fr.onload = function () { resolve(fr.result); };
+        fr.onerror = reject;
+        fr.readAsDataURL(blob);
+      });
+    });
   }
 
   function tryonViaWorkerUi(base, payload) {
@@ -1272,7 +1296,7 @@
     var openBtn = document.getElementById("openWorker");
     function syncOpen() {
       var u = cleanWorkerUrl(urlInput && urlInput.value);
-      if (openBtn) openBtn.href = u ? u + "/ui" : "#";
+      if (openBtn) openBtn.href = u || "#";
     }
     if (urlInput) urlInput.addEventListener("input", syncOpen);
     syncOpen();
@@ -1292,11 +1316,11 @@
         b = rec;
         syncOpen();
         pingWorker(workerUrlOf(b), pill);
-        try { window.open(typed + "/ui", "makeo-colab-worker"); } catch (e) {}
+        try { window.open(typed, "makeo-colab-worker"); } catch (e) {}
         if (status) {
           var hint = typed.toLowerCase().indexOf("trycloudflare.com") >= 0
             ? '<span class="error">Saved, but trycloudflare often shows error 1033. Paste the <code>colab.dev</code> URL that already loads JSON, then Save again.</span>'
-            : '<span class="ok">Saved. The worker tab should say <strong>Waiting for Makeo</strong> (or JSON). Close any Cloudflare 1033 tab. Then Create look.</span>';
+            : '<span class="ok">Saved. The new tab should show <code>{"ok":true}</code>. Then drop photos and Create look. Leave Colab running.</span>';
           status.innerHTML = hint;
         }
       });
@@ -1320,15 +1344,23 @@
         return;
       }
       go.disabled = true;
-      status.textContent = "Sending to Colab through the worker tab… 1–3 minutes. Click through Cloudflare there if it appears.";
+      status.textContent = "Sending to Colab… this can take 1–3 minutes.";
       Promise.all([fileToDataUrl(person, 1280), fileToDataUrl(garment, 1280)])
         .then(function (pair) {
-          return tryonViaWorkerUi(base, {
+          var payload = {
             person: pair[0],
             garment: pair[1],
             category: chipValue("catCategory") || "one-pieces",
             garment_photo_type: chipValue("catPhotoType") || "flat-lay",
             steps: 20
+          };
+          return tryonDirect(base, payload).catch(function (err) {
+            var msg = (err && err.message) || "";
+            if (msg.indexOf("Failed to fetch") >= 0 || msg.indexOf("NetworkError") >= 0 || msg.indexOf("Load failed") >= 0) {
+              status.textContent = "Direct call blocked; trying the worker tab…";
+              return tryonViaWorkerUi(base, payload);
+            }
+            throw err;
           });
         })
         .then(function (dataUrl) {
