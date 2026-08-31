@@ -2,6 +2,9 @@
   var KEY = "makeo-demo-v2";
   var PREV_KEYS = ["makeo-demo-v1"];
   var clips = {};
+  // Colab pulls this git file. It cannot auto-run cells (Google blocks that).
+  var COLAB_NOTEBOOK =
+    "https://colab.research.google.com/github/tmai-tech/Makeo/blob/explore-catalog-vton/notebooks/fashn_vton_colab.ipynb";
 
   function load() {
     try { return JSON.parse(localStorage.getItem(KEY) || "{}"); }
@@ -27,6 +30,8 @@
     s.brands = s.brands || [];
     s.jobs = s.jobs || [];
     s.session = s.session || null;
+    s.me = s.me || null;
+    s.makeoApiUrl = s.makeoApiUrl || "";
     s.deletedBrandIds = s.deletedBrandIds || [];
     PREV_KEYS.forEach(function (k) {
       try {
@@ -61,9 +66,27 @@
     return h;
   }
   function go(path) { location.hash = "#" + path; }
+  function apiUrl(s) {
+    return String((s || state()).makeoApiUrl || "").replace(/\/+$/, "");
+  }
+  function cleanApiUrl(raw) {
+    var u = String(raw || "").trim().replace(/\/+$/, "");
+    if (!u) return "";
+    var low = u.toLowerCase();
+    if (low.indexOf("colab.research.google.com") >= 0) return "";
+    if (low.indexOf("github.com") >= 0 || low.indexOf("githubusercontent.com") >= 0) return "";
+    return u;
+  }
   function user(s) {
+    if (apiUrl(s)) {
+      return (s.me && s.me.id) ? s.me : null;
+    }
     if (!s.session) return null;
     return s.users.filter(function (u) { return u.id === s.session; })[0] || null;
+  }
+  function whoLabel(u) {
+    if (!u) return "";
+    return (u.name || u.email || "").trim();
   }
   function mine(s, list) {
     var u = user(s);
@@ -82,6 +105,41 @@
   }
   function flowKeyOf(b) {
     return ((b && (b.flowKey || b.geminiKey)) || "").trim();
+  }
+  function falKeyOf(b) {
+    return ((b && b.falKey) || "").trim();
+  }
+  function hasVideoKey(b) {
+    return !!(falKeyOf(b) || flowKeyOf(b));
+  }
+  function falModels() {
+    return {
+      "ltx-fast": {
+        id: "fal-ai/ltx-2.3/text-to-video/fast",
+        label: "LTX 2.3 Fast (cheap, ~$0.25 for 6s)",
+        input: function (prompt) {
+          return {
+            prompt: prompt,
+            duration: 6,
+            resolution: "1080p",
+            aspect_ratio: "9:16",
+            generate_audio: true
+          };
+        }
+      },
+      "veo": {
+        id: "fal-ai/veo3.1",
+        label: "Veo 3.1 on fal (closer to Flow, costs more)",
+        input: function (prompt) {
+          return {
+            prompt: prompt,
+            aspect_ratio: "9:16",
+            duration: "8s",
+            generate_audio: true
+          };
+        }
+      }
+    };
   }
   function advanceJobs(s) {
     var now = Date.now();
@@ -117,8 +175,8 @@
   function missingForVideo(brand, mode, prompt) {
     var miss = [];
     if (!brand || !brand.name) miss.push("a brand name");
-    if (!flowKeyOf(brand)) {
-      miss.push("your Google Flow key (Brand → Google Flow key). Create one at aistudio.google.com/apikey and paste it — Generate will not run without it.");
+    if (!hasVideoKey(brand)) {
+      miss.push("a fal.ai key or a Google Flow key (Brand → Keys). Generate will not run without one of them.");
     }
     if (mode === "custom") {
       if (!(prompt || "").trim()) miss.push("your own video prompt");
@@ -189,6 +247,87 @@
               return v.blob();
             }).then(function (blob) {
               return URL.createObjectURL(blob);
+            });
+          });
+        });
+      }
+      return poll();
+    });
+  }
+  function falError(data, status) {
+    var detail = "";
+    if (data) {
+      if (typeof data.detail === "string") detail = data.detail;
+      else if (data.detail && data.detail.msg) detail = data.detail.msg;
+      else if (Array.isArray(data.detail) && data.detail[0]) {
+        detail = data.detail[0].msg || JSON.stringify(data.detail[0]);
+      } else if (data.error) detail = typeof data.error === "string" ? data.error : (data.error.message || "");
+      else if (data.message) detail = data.message;
+    }
+    var locked = /exhausted|locked|top up/i.test(detail);
+    if (status === 401) return detail || "fal.ai rejected this key (401). Copy a new key from fal.ai/dashboard/keys.";
+    if (locked || status === 402 || status === 403) {
+      return "fal.ai has no usable dollars on this account. Creating a new account or a new key does not add credit. Open fal.ai/dashboard/billing, add at least $5, wait until the balance shows a number above $0, then generate again. If it still says locked after a top-up, email support@fal.ai (known fal unlock bug). Or switch Engine to Google Veo 3.1 — that uses your Flow key, not fal.";
+    }
+    if (status === 429) return detail || "fal.ai rate-limited this key. Wait and try again.";
+    return detail || ("fal.ai failed (HTTP " + status + ").");
+  }
+  function falVideoUrl(data) {
+    if (!data) return "";
+    if (data.video && data.video.url) return data.video.url;
+    if (data.video && typeof data.video === "string") return data.video;
+    if (data.video_url) return data.video_url;
+    var list = data.videos || data.output || [];
+    if (list[0] && list[0].url) return list[0].url;
+    return "";
+  }
+  function generateFal(key, prompt, modelKey, onTick) {
+    var models = falModels();
+    var spec = models[modelKey] || models["ltx-fast"];
+    var headers = { "Content-Type": "application/json", Authorization: "Key " + key };
+    var endpoint = spec.id;
+    return fetch("https://queue.fal.run/" + endpoint, {
+      method: "POST",
+      headers: headers,
+      body: JSON.stringify(spec.input(prompt))
+    }).then(function (res) {
+      return res.json().then(function (data) {
+        if (!res.ok) throw new Error(falError(data, res.status));
+        if (!data.request_id && !data.status_url) {
+          throw new Error("fal.ai did not start a job. " + JSON.stringify(data).slice(0, 240));
+        }
+        return {
+          statusUrl: data.status_url || ("https://queue.fal.run/" + endpoint + "/requests/" + data.request_id + "/status"),
+          resultUrl: data.response_url || ("https://queue.fal.run/" + endpoint + "/requests/" + data.request_id)
+        };
+      });
+    }).then(function (urls) {
+      var tries = 0;
+      function poll() {
+        tries += 1;
+        if (onTick) onTick("Waiting on fal.ai (" + spec.label + ")… " + tries * 5 + "s");
+        return fetch(urls.statusUrl + (urls.statusUrl.indexOf("?") >= 0 ? "&" : "?") + "logs=1", { headers: headers }).then(function (res) {
+          return res.json().then(function (data) {
+            if (!res.ok) throw new Error(falError(data, res.status));
+            var st = data.status || "";
+            if (st === "IN_QUEUE" && onTick) onTick("fal.ai queue position " + (data.queue_position == null ? "?" : data.queue_position));
+            if (st !== "COMPLETED") {
+              if (tries > 48) throw new Error("fal.ai did not finish in 4 minutes. Check credit and try again.");
+              return new Promise(function (r) { setTimeout(r, 5000); }).then(poll);
+            }
+            if (data.error) throw new Error(data.error);
+            return fetch(urls.resultUrl, { headers: headers }).then(function (r2) {
+              return r2.json().then(function (out) {
+                if (!r2.ok) throw new Error(falError(out, r2.status));
+                var href = falVideoUrl(out);
+                if (!href) throw new Error("fal.ai finished but returned no video. " + JSON.stringify(out).slice(0, 300));
+                return fetch(href).then(function (v) {
+                  if (!v.ok) throw new Error("Could not download the fal.ai file (HTTP " + v.status + ").");
+                  return v.blob();
+                }).then(function (blob) {
+                  return URL.createObjectURL(blob);
+                });
+              });
             });
           });
         });
@@ -310,27 +449,44 @@
     var nav = opts.landing
       ? '<a href="#/help">Easy tutorial</a><a href="#/signup">Create account</a><a href="#/login">Sign in</a>'
       : (u
-        ? '<a href="#/home">Home</a><a href="#/help">Tutorial</a><span class="who">' + esc(u.email) + "</span><a href=\"#/logout\">Log out</a>"
+        ? '<a href="#/home">Home</a><a href="#/help">Tutorial</a><span class="who">' + esc(whoLabel(u)) + "</span><a href=\"#/logout\">Log out</a>"
         : '<a href="#/help">Tutorial</a><a href="#/login">Sign in</a><a href="#/signup">Create account</a>');
+    var preview = location.pathname.indexOf("/preview/fal") >= 0;
     return (
-      '<header class="top"><a class="brand" href="#/"><img src="assets/icon.svg" width="28" height="28" alt=""/><span>Makeo</span></a><nav>' +
-      nav + "</nav></header><main>" + inner + "</main>" +
-      "<footer><p>Live at <a href=\"https://tmai-tech.github.io/Makeo/\">tmai-tech.github.io/Makeo</a></p></footer>"
+      '<header class="top"><a class="brand" href="#/"><img src="assets/icon.svg" width="32" height="32" alt=""/><span>Makeo</span></a><nav>' +
+      nav + "</nav></header>" +
+      (preview
+        ? '<div class="banner">PREVIEW of the fal.ai branch. This is not the live site. Live stays at <a href="https://tmai-tech.github.io/Makeo/">tmai-tech.github.io/Makeo</a>.</div>'
+        : "") +
+      "<main>" + inner + "</main>" +
+      "<footer><p>" +
+      (preview
+        ? 'Preview · atelier2 · <a href="https://tmai-tech.github.io/Makeo/preview/fal/?v=atelier2">/preview/fal/</a>'
+        : 'Studio UI · atelier2 · <a href="https://tmai-tech.github.io/Makeo/?v=atelier2">tmai-tech.github.io/Makeo</a>') +
+      "</p></footer>"
     );
   }
 
   function landing() {
     return (
       '<section class="hero">' +
-      '<p class="eyebrow">Create account · Add brand · Generate a preview · Approve</p>' +
-      "<h1>Your brand. Your prompt.<br/>An 8-second Reel.</h1>" +
-      '<p class="lead">Follow the easy tutorial. We show every click — including which Google page gives you a key.</p>' +
-      '<div class="actions"><a class="btn primary" href="#/help">Start the easy tutorial</a>' +
-      '<a class="btn ghost" href="#/signup">I already know — create account</a></div></section>' +
-      '<ol class="pipe" id="how"><li><strong>1. Account</strong><span>Email + password, this browser only</span></li>' +
+      '<p class="eyebrow">Atelier for Indian brands</p>' +
+      "<h1>Lookbooks and Reels<br/>from one studio.</h1>" +
+      '<p class="lead">Dress a model in a saree or lehenga. Cut an 8-second Reel. Nothing posts until you approve.</p>' +
+      '<div class="actions"><a class="btn primary" href="#/signup">Create account</a>' +
+      '<a class="btn ghost" href="#/help">See every click</a></div></section>' +
+      '<div class="pillar-grid">' +
+      '<article class="pillar"><p class="eyebrow">Catalog</p><h2>Virtual try-on</h2>' +
+      "<p>Model plus garment on a Colab T4. Pallu, zari, and print stay on the cloth — not a white packshot.</p></article>" +
+      '<article class="pillar"><p class="eyebrow">Reels</p><h2>Eight seconds</h2>' +
+      "<p>Your prompt, your fal or Flow key. Approve in the inbox before Instagram ever sees it.</p></article>" +
+      '<article class="pillar"><p class="eyebrow">Account</p><h2>Any device</h2>' +
+      "<p>Name, email, and password on the Makeo server. Sign in from the next phone.</p></article>" +
+      "</div>" +
+      '<ol class="pipe" id="how"><li><strong>1. Account</strong><span>Name, email, password on the Makeo server</span></li>' +
       "<li><strong>2. Brand</strong><span>Name, pitch, hook, optional logo</span></li>" +
-      "<li><strong>3. Generate</strong><span>Needs your prompt, or a pitch/hook for a topic</span></li>" +
-      "<li><strong>4. Approve</strong><span>Only after a preview video is ready</span></li></ol>"
+      "<li><strong>3. Generate or catalog</strong><span>A Reel prompt, or a model and a garment</span></li>" +
+      "<li><strong>4. Approve</strong><span>Only after a preview is ready</span></li></ol>"
     );
   }
 
@@ -342,15 +498,20 @@
       '<div class="how">' +
 
       '<div class="how-step"><h3><span class="n">1</span> Create your Makeo login</h3>' +
-      "<p>This login is only for Makeo in <em>this</em> browser. Invent a password. Do not use your bank password.</p>" +
-      '<p class="click">Click <strong>Create my account now</strong> below. Type your email. Type a password (6 or more letters). Click <strong>Create account</strong>.</p>' +
+      "<p>Accounts live on the Makeo server, so you can sign in from another phone or computer. Invent a password. Do not use your bank password.</p>" +
+      '<p class="click">Paste your Makeo server URL if asked. Click <strong>Create my account now</strong>. Type your name, email, password, and the same password again (8 or more letters). Click <strong>Create account</strong>.</p>' +
       '<a class="btn primary" href="#/signup">Create my account now</a></div>' +
 
       '<div class="how-step"><h3><span class="n">2</span> Add your brand name</h3>' +
       "<p>After you are in, you will see “Your brands”.</p>" +
-      '<p class="click">Click <strong>New brand</strong>. In <strong>Name</strong> type your shop or brand (example: Makers Nook). You can leave the other boxes empty. Click <strong>Save and enter Flow key</strong>.</p></div>' +
+      '<p class="click">Click <strong>New brand</strong>. In <strong>Name</strong> type your shop or brand (example: Makers Nook). You can leave the other boxes empty. Click <strong>Save and enter keys</strong>.</p></div>' +
 
-      '<div class="how-step"><h3><span class="n">3</span> Get a Google Flow key (skip the button that fails)</h3>' +
+      '<div class="how-step"><h3><span class="n">3</span> Get a fal.ai key (this branch)</h3>' +
+      "<p>fal’s API is prepaid. A new fal login starts at $0. Their free website clips are not usable from this key.</p>" +
+      '<p class="click">Open <a href="https://fal.ai/dashboard/billing" target="_blank" rel="noopener"><strong>fal billing</strong></a>, add at least $5, then copy a key from <a href="https://fal.ai/dashboard/keys" target="_blank" rel="noopener">fal keys</a> and paste it on Makeo → Keys.</p>' +
+      "<p>Or skip fal and use your Google Flow key in step 3b.</p></div>" +
+
+      '<div class="how-step"><h3><span class="n">3b</span> Get a Google Flow key (optional)</h3>' +
       "<p>Google makes the video. You must bring your own key. Use a <strong>personal Gmail</strong> (not a work/school email if you can). Keep the Makeo tab open.</p>" +
       '<p class="error">If you see <strong>Failed to create project</strong>, do <em>not</em> click “Create API key in new project” again. That Google page is broken for many people. Use Plan B below.</p>' +
       "<p><strong>Plan A — only if Google already shows a project name</strong></p>" +
@@ -376,9 +537,9 @@
       "<p>Come back to Makeo. Do not share this key.</p></div>" +
 
       '<div class="how-step"><h3><span class="n">4</span> Paste the key into Makeo</h3>' +
-      "<p>You should be on the page <strong>Enter your Google Flow key</strong>. If not:</p>" +
-      '<p class="click">Click <strong>Home</strong> → your brand name → <strong>Flow key</strong>.</p>' +
-      '<p class="click">Click inside the box <strong>Google Flow key</strong>. Paste (<strong>Ctrl+V</strong> on Windows, <strong>Cmd+V</strong> on Mac). Click <strong>Save Google Flow key</strong>.</p>' +
+      "<p>You should be on the page <strong>Video keys</strong>. If not:</p>" +
+      '<p class="click">Click <strong>Home</strong> → your brand name → <strong>Keys</strong>.</p>' +
+      '<p class="click">Paste the fal.ai key (or the Google key) and click <strong>Save keys</strong>.</p>' +
       "<p>You should see a green line: key saved.</p></div>" +
 
       '<div class="how-step"><h3><span class="n">5</span> Make a video</h3>' +
@@ -396,51 +557,82 @@
     );
   }
 
-  function authForm(kind, err) {
+  function authForm(kind, err, notice) {
+    var s = state();
     var title = kind === "signup" ? "Create your Makeo account" : "Sign in";
     var btn = kind === "signup" ? "Create account" : "Sign in";
     var other = kind === "signup"
       ? 'Already have one? <a href="#/login">Sign in</a>'
       : 'New here? <a href="#/signup">Create an account</a>';
+    var api = apiUrl(s);
+    var nameBlock = kind === "signup"
+      ? '<label>Full name</label><input name="name" required minlength="2" maxlength="80" autocomplete="name"/>'
+      : "";
+    var confirmBlock = kind === "signup"
+      ? '<label>Confirm password</label><div class="pw-wrap">' +
+        '<input id="passwordConfirm" name="password_confirm" type="password" required minlength="8" autocomplete="new-password"/>' +
+        '<button type="button" class="pw-toggle" data-for="passwordConfirm">Show</button></div>'
+      : "";
     return (
+      '<section class="auth-layout">' +
+      '<aside class="auth-aside"><p class="eyebrow">Makeo</p>' +
+      "<h1>" + (kind === "signup" ? "Open your studio." : "Welcome back.") + "</h1>" +
+      "<p>Accounts live on the Makeo server. Paste that URL once, then use the same login on any device.</p></aside>" +
       '<section class="panel"><h1>' + title + "</h1>" +
-      '<p class="muted">Use <strong>Create account</strong> first on this same browser. Login only works for accounts created here — not email/password from Instagram or another device.</p>' +
+      (notice ? '<p class="ok">' + esc(notice) + "</p>" : "") +
       (err ? '<p class="error">' + esc(err) + "</p>" : "") +
+      '<form id="apiUrlForm" class="api-url">' +
+      '<label>Makeo server URL</label>' +
+      '<input id="makeoApiUrl" name="makeoApiUrl" placeholder="http://127.0.0.1:8780" value="' + esc(api) + '"/>' +
+      '<div class="row"><button class="btn ghost" type="submit" id="saveApiUrl">Save server</button>' +
+      '<span class="status" id="apiPing"></span></div></form>' +
       '<form id="authForm">' +
+      nameBlock +
       '<label>Email</label><input name="email" type="email" required autocomplete="username"/>' +
-      '<label>Password</label><input name="password" type="password" required minlength="6" autocomplete="' +
-      (kind === "signup" ? "new-password" : "current-password") + '"/>' +
+      '<label>Password</label><div class="pw-wrap">' +
+      '<input id="password" name="password" type="password" required' +
+      (kind === "signup" ? ' minlength="8" autocomplete="new-password"' : ' autocomplete="current-password"') +
+      '/>' +
+      '<button type="button" class="pw-toggle" data-for="password">Show</button></div>' +
+      confirmBlock +
       '<div class="row"><button class="btn primary" type="submit">' + btn + "</button></div>" +
-      '<p class="muted">' + other + "</p></form></section>"
+      '<p class="muted">' + other + "</p></form></section></section>"
     );
   }
 
   function home(s) {
     var brands = mine(s, s.brands);
     var cards = brands.length
-      ? brands.map(function (b) {
-          return '<div class="card"><a href="#/brands/' + b.id + '"><strong>' + esc(b.name) +
-            "</strong></a><div class=\"muted\">" + esc(b.slug) + "</div>" +
-            '<div class="row"><a href="#/brands/' + b.id + '/keys">Flow key</a>' +
-            ' · <a href="#/brands/' + b.id + '/compose">Generate</a>' +
-            ' · <a href="#/brands/' + b.id + '/inbox">Inbox</a>' +
-            ' · <a href="#/brands/' + b.id + '/instagram">Instagram</a></div>' +
+      ? '<div class="brand-grid">' + brands.map(function (b) {
+          var mark = b.logo
+            ? '<img class="logo-preview" src="' + b.logo + '" alt=""/>'
+            : '<span class="logo-mark">' + esc((b.name || "?").charAt(0)) + "</span>";
+          return '<article class="card brand-card"><a class="brand-card-main" href="#/brands/' + b.id + '">' +
+            mark + "<div><strong>" + esc(b.name) + '</strong><span class="muted">' + esc(b.slug) +
+            "</span></div></a><nav class=\"card-links\">" +
+            '<a href="#/brands/' + b.id + '/catalog">Catalog</a>' +
+            '<a href="#/brands/' + b.id + '/compose">Generate</a>' +
+            '<a href="#/brands/' + b.id + '/inbox">Inbox</a>' +
+            '<a href="#/brands/' + b.id + '/keys">Keys</a>' +
+            '<a href="#/brands/' + b.id + '/instagram">Instagram</a></nav>' +
             '<div class="row"><button type="button" class="btn no deleteBrand" data-id="' + b.id +
-            '" data-name="' + esc(b.name) + '">Delete brand</button></div></div>';
-        }).join("")
-      : '<p class="muted">No brands yet. Create one to start.</p>';
+            '" data-name="' + esc(b.name) + '">Delete brand</button></div></article>';
+        }).join("") + "</div>"
+      : '<div class="empty"><p class="muted">No brands yet. Open a house to start the lookbook.</p></div>';
     return (
-      '<div class="banner">Stuck? Open the <a href="#/help">easy tutorial</a>. You must add a <strong>Google Flow key</strong> before a video can be made.</div>' +
-      "<h1>Your brands</h1>" + cards +
-      '<div class="actions"><a class="btn primary" href="#/brands/new">New brand</a> <a class="btn ghost" href="#/help">Show me every click</a></div>'
+      '<div class="page-head"><div><p class="eyebrow">Studio</p><h1>Your brands</h1></div>' +
+      '<div class="actions tight"><a class="btn primary" href="#/brands/new">New brand</a>' +
+      '<a class="btn ghost" href="#/help">Tutorial</a></div></div>' +
+      '<div class="banner">Add a <strong>fal.ai</strong> or Google Flow key before a Reel can be made. Catalog try-on uses the Colab worker.</div>' +
+      cards
     );
   }
 
   function brandForm(b, err) {
     b = b || {};
     return (
-      '<section class="panel"><h1>' + (b.id ? "Edit " + esc(b.name) : "New brand") + "</h1>" +
-      '<p class="muted">Name is required. You will be asked for your Google Flow key next — Generate will not run without it.</p>' +
+      '<section class="panel"><p class="eyebrow">House</p><h1>' + (b.id ? "Edit " + esc(b.name) : "New brand") + "</h1>" +
+      '<p class="muted">Name is required. Next you will add a fal.ai key or a Google Flow key — Generate will not run without one.</p>' +
       (err ? '<p class="error">' + esc(err) + "</p>" : "") +
       '<form id="brandForm">' +
       '<label>Name</label><input name="name" required value="' + esc(b.name || "") + '"/>' +
@@ -452,47 +644,53 @@
       '<label>Logo (optional)</label><input name="logo" type="file" accept="image/*"/>' +
       (b.logo ? '<p><img class="logo-preview" src="' + b.logo + '" alt="logo"/></p>' : "") +
       '<label>Splash / end-card (optional)</label><input name="splash" type="file" accept="image/*,.gif"/>' +
-      '<div class="row"><button class="btn primary" type="submit">Save and enter Flow key</button></div></form>' +
+      '<div class="row"><button class="btn primary" type="submit">Save and enter keys</button></div></form>' +
       (b.id
         ? '<div class="row"><button type="button" class="btn no deleteBrand" data-id="' + b.id +
           '" data-name="' + esc(b.name) + '">Delete this brand</button></div>'
         : "") +
       (b.id
-        ? '<p><a href="#/brands/' + b.id + '/keys">Google Flow key</a> · <a href="#/brands/' + b.id + '/compose">Generate</a> · <a href="#/brands/' + b.id + '/inbox">Inbox</a></p>'
+        ? '<p><a href="#/brands/' + b.id + '/keys">Keys</a> · <a href="#/brands/' + b.id + '/compose">Generate</a> · <a href="#/brands/' + b.id + '/catalog">Catalog</a> · <a href="#/brands/' + b.id + '/inbox">Inbox</a></p>'
         : "") +
       "</section>"
     );
   }
 
   function keysForm(b, err, ok) {
-    var has = flowKeyOf(b);
+    var hasFal = falKeyOf(b);
+    var hasFlow = flowKeyOf(b);
     return (
-      '<section class="panel"><h1>Enter your Google Flow key</h1>' +
-      '<p>We need <strong>your</strong> key. Makeo does not give you one. Follow these clicks:</p>' +
-      '<div class="how-step"><h3><span class="n">A</span> Get the key from Google</h3>' +
-      '<p class="error">If Google says <strong>Failed to create project</strong>, do not keep retrying “new project”. Use Plan B.</p>' +
-      '<p><strong>Plan A</strong> — only if a project name is already listed:</p>' +
-      '<p><a class="btn primary" href="https://aistudio.google.com/apikey" target="_blank" rel="noopener">Open Google AI Studio keys</a></p>' +
-      "<ol><li>Create API key → pick an <strong>existing</strong> project → Copy.</li></ol>" +
-      '<p><strong>Plan B</strong> (when create-project fails):</p>' +
-      "<ol>" +
-      '<li><a href="https://console.cloud.google.com/projectcreate" target="_blank" rel="noopener">Create a Google project</a> named Makeo → <strong>Create</strong>.</li>' +
-      '<li><a href="https://console.cloud.google.com/apis/library/generativelanguage.googleapis.com" target="_blank" rel="noopener">Turn on Gemini API</a> → <strong>Enable</strong>.</li>' +
-      '<li>Back on <a href="https://aistudio.google.com/apikey" target="_blank" rel="noopener">AI Studio keys</a>: import that project if asked, then Create API key in <strong>that</strong> project (not a new one) → <strong>Copy</strong>.</li>' +
-      "</ol>" +
-      "<p>Use personal Gmail if a work email is blocked. Turn off VPN.</p></div>" +
-      '<div class="how-step"><h3><span class="n">B</span> Paste it here</h3>' +
-      '<p class="click">Click the box below. Paste. Click <strong>Save Google Flow key</strong>.</p></div>' +
-      (has ? '<p class="ok">A key is saved (…' + esc(has.slice(-4)) + "). Paste a new one to replace it.</p>" : '<p class="error">No Google Flow key on this brand yet. Generate is blocked until you save one.</p>') +
+      '<section class="panel"><h1>Video keys</h1>' +
+      '<p>This branch can generate with <strong>fal.ai</strong> (new) or the existing Google Flow / Veo key. Makeo does not give you a key.</p>' +
+
+      '<div class="how-step"><h3><span class="n">1</span> fal.ai key (paid API — a new account is $0)</h3>' +
+      '<p class="error">A fresh fal account and a new key do <strong>not</strong> include API credit. The website sandbox (free FLUX clips) is not the same as the API key. Until Billing shows a balance above $0, Generate with fal will say “Exhausted balance / User is locked”.</p>' +
+      '<p class="click">1. Open <a href="https://fal.ai/dashboard/billing" target="_blank" rel="noopener"><strong>fal.ai/dashboard/billing</strong></a>. Add a card and top up at least <strong>$5</strong>. Wait until the page shows a positive balance.</p>' +
+      '<p class="click">2. Then open <a href="https://fal.ai/dashboard/keys" target="_blank" rel="noopener"><strong>fal.ai/dashboard/keys</strong></a> → Create / Add key → paste it below → Save keys.</p>' +
+      (hasFal
+        ? '<p class="ok">fal.ai key on file (…' + esc(hasFal.slice(-4)) + ").</p>"
+        : '<p class="muted">No fal.ai key yet.</p>') +
+      "</div>" +
+
+      '<div class="how-step"><h3><span class="n">2</span> Google Flow key (optional backup)</h3>' +
+      '<p>Only needed if you want Veo through Google instead of fal. If Google says <strong>Failed to create project</strong>, use Plan B on the <a href="#/help">tutorial</a>.</p>' +
+      (hasFlow
+        ? '<p class="ok">Google Flow key on file (…' + esc(hasFlow.slice(-4)) + ").</p>"
+        : '<p class="muted">No Google Flow key yet.</p>') +
+      "</div>" +
+
+      (!hasVideoKey(b) ? '<p class="error">Save at least one key. Generate is blocked until you do.</p>' : "") +
       (err ? '<p class="error">' + esc(err) + "</p>" : "") +
       (ok ? '<p class="ok">' + esc(ok) + "</p>" : "") +
       '<form id="keysForm">' +
+      '<label>fal.ai API key</label>' +
+      '<input name="falKey" type="password" autocomplete="off" placeholder="Paste your fal.ai key"/>' +
       '<label>Google Flow key</label>' +
-      '<input name="flowKey" type="password" autocomplete="off" placeholder="Paste your Google Flow key" ' + (has ? "" : "required") + "/>" +
+      '<input name="flowKey" type="password" autocomplete="off" placeholder="Paste your Google Flow key (optional)"/>' +
       '<label>Flow project URL (optional)</label>' +
       '<input name="flowProjectUrl" value="' + esc(b.flowProjectUrl || "") + '" placeholder="https://labs.google/fx/tools/flow/project/…"/>' +
-      '<div class="row"><button class="btn primary" type="submit">Save Google Flow key</button>' +
-      (has ? '<a class="btn ghost" href="#/brands/' + b.id + '/compose">Generate video</a>' : "") +
+      '<div class="row"><button class="btn primary" type="submit">Save keys</button>' +
+      (hasVideoKey(b) ? '<a class="btn ghost" href="#/brands/' + b.id + '/compose">Generate video</a>' : "") +
       "</div></form></section>"
     );
   }
@@ -514,21 +712,59 @@
   }
 
   function compose(b, err) {
+    var hasFal = falKeyOf(b);
+    var hasFlow = flowKeyOf(b);
+    var engineOpts = "";
+    if (hasFlow) engineOpts += '<option value="veo">Google Veo 3.1 (uses your Flow key)</option>';
+    if (hasFal) engineOpts += '<option value="fal">fal.ai (needs a paid fal balance)</option>';
+    var modelOpts = Object.keys(falModels()).map(function (k) {
+      return '<option value="' + k + '">' + esc(falModels()[k].label) + "</option>";
+    }).join("");
     return (
-      '<section class="panel"><h1>Generate for ' + esc(b.name) + "</h1>" +
-      '<p class="muted">This calls <strong>Veo 3.1</strong> with the Gemini key saved on the brand. Google Flow’s website is not opened from here. Without a key or a prompt, nothing is generated and the missing items are listed.</p>' +
-      (flowKeyOf(b)
-        ? '<p class="ok">Google Flow key on file (…' + esc(flowKeyOf(b).slice(-4)) + ').</p>'
-        : '<p class="error">No Google Flow key. <a href="#/brands/' + b.id + '/keys">Enter your Google Flow key</a> before generating.</p>') +
+      '<section class="panel"><p class="eyebrow">Reel</p><h1>Generate for ' + esc(b.name) + "</h1>" +
+      '<p class="muted">This branch can call <strong>fal.ai</strong> or Google Veo. Without a key or a prompt, nothing is generated and the missing items are listed.</p>' +
+      (hasFal
+        ? '<p class="ok">fal.ai key on file (…' + esc(hasFal.slice(-4)) + ").</p>"
+        : '<p class="muted">No fal.ai key. <a href="#/brands/' + b.id + '/keys">Add one</a> after you have a paid fal balance.</p>') +
+      (hasFal
+        ? '<p class="muted">fal API is prepaid. If Generate says exhausted/locked, top up at <a href="https://fal.ai/dashboard/billing" target="_blank" rel="noopener">fal billing</a> or pick Google Veo below.</p>'
+        : "") +
+      (hasFlow
+        ? '<p class="ok">Google Flow key on file (…' + esc(flowKeyOf(b).slice(-4)) + ").</p>"
+        : "") +
+      (!hasVideoKey(b)
+        ? '<p class="error">No video key. <a href="#/brands/' + b.id + '/keys">Enter a fal.ai or Google Flow key</a> before generating.</p>'
+        : "") +
       (err ? '<p class="error">' + err + "</p>" : "") +
-      '<form id="composeForm"><label>Mode</label><select name="mode" id="mode">' +
+      '<form id="composeForm">' +
+      (engineOpts
+        ? '<label>Engine</label><select name="engine" id="engine">' + engineOpts + "</select>"
+        : "") +
+      (hasFal
+        ? '<label>fal model</label><select name="falModel" id="falModel">' + modelOpts + "</select>"
+        : "") +
+      '<label>Mode</label><select name="mode" id="mode">' +
       '<option value="custom">My own prompt</option>' +
       '<option value="trend">Topic from this brand’s pitch</option></select>' +
-      '<label>Video prompt</label><textarea name="prompt" id="prompt" rows="4" placeholder="Describe the 8-second scene for ' + esc(b.name) + '…"></textarea>' +
+      '<label>Video prompt</label><textarea name="prompt" id="prompt" rows="4" placeholder="Describe the scene for ' + esc(b.name) + '…"></textarea>' +
       '<label>Caption (optional)</label><input name="caption" placeholder="' + esc(b.name) + '"/>' +
       '<div class="row"><button class="btn primary" type="submit" id="genBtn">Generate video</button>' +
       '<a class="btn ghost" href="#/brands/' + b.id + '/inbox">Inbox</a></div>' +
-      '<p class="status" id="composeStatus"></p></form></section>'
+      '<p class="status" id="composeStatus"></p></form></section>' +
+      catalogPanel(b)
+    );
+  }
+
+  function catalogPanel(b) {
+    return (
+      '<section class="panel" id="catalogPanel" style="margin-top:20px">' +
+      "<h2>Catalog try-on · Indian outfits</h2>" +
+      '<p class="muted">A dedicated page: upload a model and a garment, send them to the Colab T4 in the background, keep working here.</p>' +
+      '<div class="row">' +
+      '<a class="btn primary" href="#/brands/' + b.id + '/catalog">Open catalog creator</a>' +
+      '<button type="button" class="btn ghost" id="startColab">Start Colab worker</button>' +
+      "</div>" +
+      '<p class="status" id="colabStatus"></p></section>'
     );
   }
 
@@ -585,60 +821,110 @@
     );
   }
 
+  function bindPwToggles() {
+    Array.prototype.forEach.call(document.querySelectorAll(".pw-toggle"), function (btn) {
+      btn.addEventListener("click", function () {
+        var id = btn.getAttribute("data-for");
+        var el = id ? document.getElementById(id) : null;
+        if (!el) return;
+        var show = el.type === "password";
+        el.type = show ? "text" : "password";
+        btn.textContent = show ? "Hide" : "Show";
+      });
+    });
+  }
+
+  function showAuth(kind, err, notice) {
+    var s = state();
+    render(shell(s, authForm(kind, err, notice), { landing: true }));
+    bindAuth(kind);
+  }
+
+  function pingMakeoApi(base, cb) {
+    fetch(base + "/health", { credentials: "include" }).then(function (r) {
+      return r.json();
+    }).then(function (j) {
+      cb(!!(j && j.ok));
+    }).catch(function () { cb(false); });
+  }
+
+  function bindApiUrlForm(kind) {
+    var form = document.getElementById("apiUrlForm");
+    if (!form) return;
+    form.addEventListener("submit", function (e) {
+      e.preventDefault();
+      var cleaned = cleanApiUrl(form.makeoApiUrl.value);
+      var ping = document.getElementById("apiPing");
+      if (!cleaned) {
+        if (ping) ping.textContent = "Need http://127.0.0.1:8780 (the uvicorn host).";
+        return;
+      }
+      var s = state();
+      s.makeoApiUrl = cleaned;
+      save(s);
+      if (ping) ping.textContent = "Checking…";
+      pingMakeoApi(cleaned, function (ok) {
+        showAuth(kind, ok ? "" : "Saved, but /health did not answer. Is uvicorn running on that URL?",
+          ok ? "Server live. Create an account or sign in." : "");
+      });
+    });
+  }
+
   function bindAuth(kind) {
+    bindPwToggles();
+    bindApiUrlForm(kind);
     var form = document.getElementById("authForm");
     if (!form) return;
     form.addEventListener("submit", function (e) {
       e.preventDefault();
+      var s = state();
+      var base = apiUrl(s);
+      if (!base) {
+        showAuth(kind, "Paste your Makeo server URL first (the host running uvicorn on port 8780), then Save server.");
+        return;
+      }
       var email = form.email.value.trim().toLowerCase();
       var pass = form.password.value;
-      hash(pass).then(function (h) {
-        var s = state();
-        if (s._saveError && kind === "signup") {
-          render(shell(s, authForm("signup", "Could not save the account in this browser (private/incognito often blocks it). Try a normal window."), { landing: true }));
-          bindAuth("signup");
+      var payload;
+      if (kind === "signup") {
+        var name = (form.name && form.name.value || "").trim();
+        var confirm = form.password_confirm ? form.password_confirm.value : "";
+        if (name.length < 2) {
+          showAuth("signup", "Enter your name (2–80 characters).");
           return;
         }
-        if (kind === "signup") {
-          if (s.users.some(function (u) { return u.email === email; })) {
-            render(shell(s, authForm("signup", "That email already has an account on this browser. Use Sign in."), { landing: true }));
-            bindAuth("signup");
-            return;
-          }
-          var u = { id: uid(), email: email, pass: h };
-          s.users.push(u);
-          s.session = u.id;
-          save(s);
-          if (s._saveError) {
-            render(shell(s, authForm("signup", "Account could not be stored: " + s._saveError), { landing: true }));
-            bindAuth("signup");
-            return;
-          }
-          go("/home");
-        } else {
-          var byEmail = s.users.filter(function (x) { return x.email === email; })[0];
-          var found = s.users.filter(function (x) { return x.email === email && x.pass === h; })[0];
-          var msg;
-          if (!s.users.length) {
-            msg = "No account exists in this browser yet. Click Create account (login does not use a server).";
-          } else if (!byEmail) {
-            msg = "No account for " + email + " in this browser. Create account first, or use the same browser where you signed up.";
-          } else if (!found) {
-            msg = "Password does not match the account saved in this browser.";
-          }
-          if (msg) {
-            render(shell(s, authForm("login", msg), { landing: true }));
-            bindAuth("login");
-            return;
-          }
-          s.session = found.id;
-          save(s);
-          go("/home");
+        if (pass.length < 8) {
+          showAuth("signup", "Password must be at least 8 characters.");
+          return;
         }
+        if (pass !== confirm) {
+          showAuth("signup", "Password and confirmation do not match.");
+          return;
+        }
+        payload = { name: name, email: email, password: pass, password_confirm: confirm };
+      } else {
+        payload = { email: email, password: pass };
+      }
+      var path = kind === "signup" ? "/v1/auth/signup" : "/v1/auth/login";
+      fetch(base + path, {
+        method: "POST",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload)
+      }).then(function (r) {
+        return r.json().then(function (j) { return { r: r, j: j }; });
+      }).then(function (x) {
+        if (!x.j || !x.j.ok || !x.j.user) {
+          showAuth(kind, (x.j && x.j.error) || "Could not reach the Makeo server.");
+          return;
+        }
+        var st = state();
+        st.me = x.j.user;
+        st.session = x.j.user.id;
+        save(st);
+        go("/home");
       }).catch(function (err) {
-        var s = state();
-        render(shell(s, authForm(kind, err.message || "Login failed."), { landing: true }));
-        bindAuth(kind);
+        showAuth(kind, (err && err.message) || "Could not reach the Makeo server. Check the URL and that uvicorn is running.");
       });
     });
   }
@@ -713,21 +999,23 @@
     if (!form) return;
     form.addEventListener("submit", function (e) {
       e.preventDefault();
+      var fal = form.falKey.value.trim();
       var key = form.flowKey.value.trim();
       var s = state();
       var rec = brandBy(s, b.id);
-      if (!key && !flowKeyOf(rec)) {
-        render(shell(s, keysForm(rec, "Paste your Google Flow key. Generate will not run without it.")));
-        bindKeys(rec);
-        return;
-      }
+      if (fal) rec.falKey = fal;
       if (key) {
         rec.flowKey = key;
         rec.geminiKey = key;
       }
       rec.flowProjectUrl = form.flowProjectUrl.value.trim();
+      if (!hasVideoKey(rec)) {
+        render(shell(s, keysForm(rec, "Paste a fal.ai key or a Google Flow key. Generate will not run without one.")));
+        bindKeys(rec);
+        return;
+      }
       save(s);
-      render(shell(s, keysForm(rec, null, "Google Flow key saved. You can generate a video now.")));
+      render(shell(s, keysForm(rec, null, "Key saved. You can generate a video now.")));
       bindKeys(rec);
     });
   }
@@ -753,10 +1041,20 @@
     var prompt = document.getElementById("prompt");
     var status = document.getElementById("composeStatus");
     var btn = document.getElementById("genBtn");
-    if (!form) return;
+    if (!form) {
+      bindCatalog();
+      return;
+    }
     function sync() { prompt.disabled = mode.value !== "custom"; }
     mode.addEventListener("change", sync);
     sync();
+    var engineSel = document.getElementById("engine");
+    var falSel = document.getElementById("falModel");
+    if (engineSel && falSel) {
+      function syncEngine() { falSel.disabled = engineSel.value !== "fal"; }
+      engineSel.addEventListener("change", syncEngine);
+      syncEngine();
+    }
     form.addEventListener("submit", function (e) {
       e.preventDefault();
       var custom = prompt.value.trim();
@@ -769,10 +1067,23 @@
       btn.disabled = true;
       var line = sceneText(b, mode.value, custom);
       var caption = form.caption.value.trim() || (b.name + (b.hook ? " — " + b.hook : ""));
-      status.textContent = "Starting Veo 3.1 with your Gemini key…";
-      generateVeo(flowKeyOf(b), line, function (msg) {
-        if (status) status.textContent = msg;
-      }).then(function (url) {
+      var engineEl = document.getElementById("engine");
+      var falModelEl = document.getElementById("falModel");
+      var engine = engineEl ? engineEl.value : (falKeyOf(b) ? "fal" : "veo");
+      var falModel = falModelEl ? falModelEl.value : "ltx-fast";
+      var run;
+      if (engine === "fal") {
+        status.textContent = "Starting fal.ai…";
+        run = generateFal(falKeyOf(b), line, falModel, function (msg) {
+          if (status) status.textContent = msg;
+        });
+      } else {
+        status.textContent = "Starting Veo 3.1 with your Gemini key…";
+        run = generateVeo(flowKeyOf(b), line, function (msg) {
+          if (status) status.textContent = msg;
+        });
+      }
+      run.then(function (url) {
         var s = state();
         var u = user(s);
         var job = {
@@ -800,7 +1111,7 @@
           caption: "",
           error: "Video was not generated. " + (err && err.message
             ? (err.message.indexOf("Failed to fetch") >= 0
-              ? "The browser could not reach Google’s Veo API (blocked or offline). Confirm the Gemini key and that you opened https://tmai-tech.github.io/Makeo/"
+              ? "The browser could not reach the video API (blocked or offline). Confirm the key and that you opened this page over https."
               : err.message)
             : "Unknown error.")
         };
@@ -809,6 +1120,532 @@
         render(shell(s, compose(b, esc(job.error))));
         bindCompose(b);
       });
+    });
+    bindCatalog();
+  }
+
+  function bindCatalog() {
+    var btn = document.getElementById("startColab");
+    var status = document.getElementById("colabStatus");
+    if (!btn) return;
+    btn.addEventListener("click", function () {
+      var tab = window.open(COLAB_NOTEBOOK, "makeo-colab");
+      if (status) {
+        status.innerHTML = tab
+          ? '<span class="ok">Colab is in another tab. This site is still running. In Colab: pick <strong>T4 GPU</strong>, then <strong>Runtime → Run all</strong>. Stay here until it asks for photos.</span>'
+          : '<span class="error">The browser blocked the new tab. Allow pop-ups, or <a href="' +
+            COLAB_NOTEBOOK +
+            '" target="_blank" rel="noopener">open Colab yourself</a>.</span>';
+      }
+      try { sessionStorage.setItem("makeo-colab-launched", String(Date.now())); } catch (e) {}
+    });
+  }
+
+  function cleanWorkerUrl(raw) {
+    var u = String(raw || "").replace(/[\u200b\u200c\u200d\ufeff]/g, "").trim();
+    var colab = u.match(/https:\/\/[a-z0-9.-]+\.colab\.dev/i);
+    if (colab) return colab[0].replace(/\/+$/, "");
+    var guc = u.match(/https:\/\/[a-z0-9.-]+\.googleusercontent\.com/i);
+    if (guc) return guc[0].replace(/\/+$/, "");
+    var cf = u.match(/https:\/\/[a-z0-9-]+\.trycloudflare\.com/i);
+    if (cf) return cf[0];
+    u = u.replace(/^[`'<\[]+|[>`'\]]+$/g, "");
+    u = u.replace(/\s+/g, "");
+    u = u.replace(/\/health\/?$/i, "");
+    u = u.replace(/\/+$/, "");
+    return u;
+  }
+
+  function workerUrlOf(b) {
+    return cleanWorkerUrl(b && b.catalogWorkerUrl);
+  }
+
+  function workerUrlError(raw) {
+    var u = cleanWorkerUrl(raw);
+    if (!u) {
+      return "Paste the worker URL that loads JSON in a tab — usually https://….colab.dev";
+    }
+    var low = u.toLowerCase();
+    if (low.indexOf("colab.research.google.com") >= 0 || low.indexOf("colab.google.com") >= 0) {
+      return "That is the Colab notebook tab, not the worker. Copy the https://….colab.dev line.";
+    }
+    if (low.indexOf("github.com") >= 0 || low.indexOf("githubusercontent.com") >= 0) {
+      return "That is a GitHub link. Paste the https://….colab.dev worker URL.";
+    }
+    var okHost = (
+      low.indexOf("colab.dev") >= 0 ||
+      low.indexOf("googleusercontent.com") >= 0 ||
+      low.indexOf("trycloudflare.com") >= 0 ||
+      low.indexOf("ngrok") >= 0 ||
+      low.indexOf("loca.lt") >= 0 ||
+      low.indexOf("gradio.live") >= 0 ||
+      low.indexOf("localhost.run") >= 0 ||
+      low.indexOf("lhr.life") >= 0
+    );
+    if (!okHost) {
+      return "This does not look like a worker URL. Paste the https://….colab.dev link that shows {\"ok\":true}.";
+    }
+    if (low.indexOf("http://") === 0) {
+      return "Use the https:// worker URL. This site cannot call a plain http worker.";
+    }
+    return "";
+  }
+
+  function catalogLogsOf(b) {
+    if (b.catalogLog && b.catalogLog.length) return b.catalogLog.slice();
+    return (b.catalogShots || []).map(function (s) {
+      return {
+        id: s.id, url: s.url, category: s.category, createdAt: s.createdAt,
+        garment_photo_type: "", rating: 0, note: ""
+      };
+    });
+  }
+
+  function catalogPage(b, note) {
+    var logs = catalogLogsOf(b).slice().reverse();
+    var gallery = logs.length
+      ? '<div class="cat-log-head"><h2>Quality log · ' + logs.length + '</h2>' +
+        '<button type="button" class="btn ghost" id="exportLog">Download log JSON</button></div>' +
+        '<p class="muted">Every look is also written on the Colab machine under <code>makeo_catalog_logs/</code> (Drive if you mounted it).</p>' +
+        '<div class="cat-log">' + logs.map(function (s) {
+          var when = s.createdAt ? new Date(s.createdAt).toLocaleString() : "";
+          var rate = Number(s.rating || 0);
+          return '<article class="cat-log-card" data-id="' + esc(s.id) + '">' +
+            '<a href="' + s.url + '" download="makeo-catalog-' + esc(s.id) + '.png">' +
+            '<img src="' + s.url + '" alt="result"/></a>' +
+            '<div class="cat-log-refs">' +
+            (s.person ? '<img src="' + s.person + '" alt="model"/>' : "") +
+            (s.garment ? '<img src="' + s.garment + '" alt="garment"/>' : "") +
+            "</div>" +
+            '<p class="cat-log-meta">' + esc(s.category || "") +
+            (s.garment_photo_type ? " · " + esc(s.garment_photo_type) : "") +
+            (s.model ? " · " + esc(s.model) : "") +
+            (s.steps ? " · " + s.steps + " steps" : "") +
+            "<br/>" + esc(when) + "</p>" +
+            '<div class="cat-rate" data-id="' + esc(s.id) + '">' +
+            [1, 2, 3, 4, 5].map(function (n) {
+              return '<button type="button" class="chip' + (rate === n ? " on" : "") +
+                '" data-rate="' + n + '">' + n + "</button>";
+            }).join("") +
+            "</div></article>";
+        }).join("") + "</div>"
+      : '<p class="muted">No looks yet. Connect Colab, drop a model and a garment, then create. Each result is logged for quality review.</p>';
+    return (
+      '<div class="cat-head">' +
+      "<div><p class=\"eyebrow\">Lookbook</p><h1>" + esc(b.name) + "</h1>" +
+      '<p class="muted">Put this brand’s real outfit on a model. Colab stays in the other tab and does the GPU work.</p></div>' +
+      '<div><span class="worker bad" id="workerPill">Worker offline</span></div></div>' +
+      (note ? '<p class="banner">' + note + "</p>" : "") +
+      '<section class="panel">' +
+      '<label>Colab worker URL</label>' +
+      '<div class="row worker-row">' +
+      '<input id="workerUrl" placeholder="https://….colab.dev" value="' + esc(b.catalogWorkerUrl || "") + '"/>' +
+      '<button type="button" class="btn ghost" id="saveWorker">Save</button>' +
+      '<a class="btn ghost" id="openWorker" target="makeo-colab-worker" rel="noopener" href="#">Open worker tab</a>' +
+      '<button type="button" class="btn ghost" id="startColab">Start Colab</button>' +
+      "</div>" +
+      '<p class="muted">Paste the <code>https://….colab.dev</code> URL that shows <code>{"ok":true}</code> — no <code>/ui</code> on the end. Save should open that same JSON. Then Create look.</p>' +
+      '<div class="cat-grid">' +
+      '<div><label>Model</label><div class="drop" id="dropPerson"><span class="hint">Indian model · full body or 3/4</span>' +
+      '<input type="file" id="filePerson" accept="image/*"/></div></div>' +
+      '<div><label>Garment</label><div class="drop" id="dropGarment"><span class="hint">Flat-lay or hanger · show pallu / border</span>' +
+      '<input type="file" id="fileGarment" accept="image/*"/></div></div>' +
+      '<div><label>Result</label><div class="cat-result" id="catResult"><span class="muted">Waiting</span></div></div>' +
+      "</div>" +
+      '<label>Outfit type</label><div class="chips" id="catCategory">' +
+      '<button type="button" class="chip on" data-v="one-pieces">Saree / anarkali</button>' +
+      '<button type="button" class="chip" data-v="tops">Kurti / blouse</button>' +
+      '<button type="button" class="chip" data-v="bottoms">Palazzo / salwar</button></div>' +
+      '<label>Garment photo</label><div class="chips" id="catPhotoType">' +
+      '<button type="button" class="chip on" data-v="flat-lay">Flat-lay / hanger</button>' +
+      '<button type="button" class="chip" data-v="model">Already on a person</button></div>' +
+      '<label>Try-on model</label>' +
+      '<select id="catModel">' +
+      '<option value="fashn-vton-1.5">FASHN VTON 1.5 · Apache · T4 default</option>' +
+      '<option value="idm-vton">IDM-VTON · best single garment · non-commercial</option>' +
+      '<option value="catvton">CatVTON · ICLR 2025 · light</option>' +
+      '<option value="leffa">Leffa · fabric / pose</option>' +
+      '<option value="kolors">Kolors Virtual Try-On · most-used HF Space</option>' +
+      "</select>" +
+      '<p class="muted" id="catModelNote">FASHN runs on your Colab T4. The others use their official Hugging Face Spaces from that same worker.</p>' +
+      '<div class="row">' +
+      '<button type="button" class="btn primary" id="catGo">Create look</button>' +
+      '<a class="btn ghost" href="#/brands/' + b.id + '/compose">Back to video</a>' +
+      "</div>" +
+      '<p class="status" id="catStatus"></p></section>' +
+      gallery
+    );
+  }
+
+  function bindDrop(inputId, dropId) {
+    var input = document.getElementById(inputId);
+    var drop = document.getElementById(dropId);
+    if (!input || !drop) return;
+    function show() {
+      var f = input.files && input.files[0];
+      var old = drop.querySelector("img");
+      if (old) old.remove();
+      if (!f) { drop.classList.remove("has"); return; }
+      var img = document.createElement("img");
+      img.alt = "";
+      img.src = URL.createObjectURL(f);
+      drop.appendChild(img);
+      drop.classList.add("has");
+    }
+    input.addEventListener("change", show);
+  }
+
+  function bindChips(id, onChange) {
+    var root = document.getElementById(id);
+    if (!root) return;
+    root.addEventListener("click", function (e) {
+      var btn = e.target.closest(".chip");
+      if (!btn) return;
+      root.querySelectorAll(".chip").forEach(function (c) { c.classList.toggle("on", c === btn); });
+      if (onChange) onChange(btn.getAttribute("data-v"));
+    });
+  }
+
+  function chipValue(id) {
+    var on = document.querySelector("#" + id + " .chip.on");
+    return on ? on.getAttribute("data-v") : "";
+  }
+
+  function pingWorker(url, pill) {
+    if (!pill) return;
+    if (!url) {
+      pill.className = "worker bad";
+      pill.textContent = "No worker URL";
+      return;
+    }
+    fetch(url + "/health", { mode: "cors", cache: "no-store", credentials: "omit" }).then(function (r) { return r.json(); }).then(function (d) {
+      pill.className = "worker " + (d && d.ok ? "ok" : "bad");
+      pill.textContent = d && d.ok ? "Colab worker live" : "Worker not ready";
+    }).catch(function () {
+      pill.className = "worker bad";
+      pill.textContent = "Open worker URL once";
+    });
+  }
+
+  function fillModelSelect(url) {
+    var sel = document.getElementById("catModel");
+    var note = document.getElementById("catModelNote");
+    if (!sel || !url) return;
+    fetch(url + "/models", { mode: "cors", cache: "no-store", credentials: "omit" }).then(function (r) {
+      return r.json();
+    }).then(function (d) {
+      if (!d || !d.models || !d.models.length) return;
+      var cur = sel.value;
+      sel.innerHTML = d.models.map(function (m) {
+        var label = (m.name || m.id) + (m.license ? " · " + m.license : "") + (m.where ? " · " + m.where : "");
+        return '<option value="' + esc(m.id) + '">' + esc(label) + "</option>";
+      }).join("");
+      if (cur && sel.querySelector('option[value="' + cur + '"]')) sel.value = cur;
+      else if (d.current) sel.value = d.current;
+      function showNote() {
+        var spec = null;
+        d.models.forEach(function (m) { if (m.id === sel.value) spec = m; });
+        if (note && spec) note.textContent = spec.note || "";
+      }
+      sel.onchange = showNote;
+      showNote();
+    }).catch(function () {});
+  }
+
+  function workerBlockedHtml(url) {
+    return '<span class="error">Colab is running, but this browser has not been allowed through Cloudflare yet. ' +
+      'Open <a href="' + esc(url) + '" target="_blank" rel="noopener">' + esc(url) + "</a> " +
+      "in a new tab, click through the warning until you see JSON like <code>{\"ok\":true}</code>, " +
+      "then come back and try Create look again. Do not restart Colab.</span>";
+  }
+
+  function tryonDirect(base, payload) {
+    function post(path) {
+      return fetch(base + path, {
+        method: "POST",
+        mode: "cors",
+        credentials: "omit",
+        headers: { "Content-Type": "application/json", "Accept": "image/png,application/json" },
+        body: JSON.stringify(payload)
+      }).then(function (r) {
+        if (r.status === 404 && path === "/tryon") return post("/");
+        if (!r.ok) {
+          return r.text().then(function (t) {
+            throw new Error((t || r.statusText || "try-on failed").slice(0, 240));
+          });
+        }
+        return r.blob();
+      });
+    }
+    return post("/tryon").then(function (blob) {
+      return new Promise(function (resolve, reject) {
+        var fr = new FileReader();
+        fr.onload = function () { resolve(fr.result); };
+        fr.onerror = reject;
+        fr.readAsDataURL(blob);
+      });
+    });
+  }
+
+  function usesColabProxy(url) {
+    var low = String(url || "").toLowerCase();
+    return low.indexOf("colab.dev") >= 0 || low.indexOf("googleusercontent.com") >= 0;
+  }
+
+  function tryonViaWorkerUi(base, payload) {
+    return new Promise(function (resolve, reject) {
+      var origin;
+      try { origin = new URL(base).origin; } catch (e) {
+        reject(new Error("Worker URL is not valid."));
+        return;
+      }
+      var uiUrl = base + "/ui?t=" + Date.now();
+      var w = window.open(uiUrl, "makeo-colab-ui");
+      if (!w) {
+        reject(new Error("The worker tab was blocked. Allow pop-ups for this site, then Create look again."));
+        return;
+      }
+      try { w.location.href = uiUrl; } catch (e) {}
+      var done = false;
+      var sent = false;
+      function finish(err, dataUrl) {
+        if (done) return;
+        done = true;
+        window.removeEventListener("message", onMsg);
+        clearInterval(timer);
+        clearTimeout(readyWait);
+        clearTimeout(limit);
+        if (err) reject(err);
+        else resolve(dataUrl);
+      }
+      function onMsg(e) {
+        if (e.origin !== origin) return;
+        var d = e.data || {};
+        if ((d.type === "worker-ui-ready" || d.type === "pong") && !sent) {
+          sent = true;
+          clearTimeout(readyWait);
+          w.postMessage({ type: "tryon", payload: payload }, origin);
+          return;
+        }
+        if (d.type === "result") {
+          if (d.ok && d.dataUrl) finish(null, d.dataUrl);
+          else finish(new Error(d.error || "try-on failed"));
+        }
+      }
+      window.addEventListener("message", onMsg);
+      var timer = setInterval(function () {
+        try { w.postMessage({ type: "ping" }, origin); } catch (e) {}
+      }, 800);
+      var readyWait = setTimeout(function () {
+        if (!sent) {
+          finish(new Error("The worker tab did not start. It must say “Waiting for Makeo”. If you see JSON or Not Found, in Colab stop only the worker cell, run it again, wait for (json-v6), paste the new URL, allow pop-ups, then Create look."));
+        }
+      }, 20000);
+      var limit = setTimeout(function () {
+        finish(new Error("Colab did not return a look in time. Keep the worker tab and the Colab notebook open and try again."));
+      }, 4 * 60 * 1000);
+    });
+  }
+
+  function fileToDataUrl(file, maxEdge) {
+    return new Promise(function (resolve, reject) {
+      var img = new Image();
+      var url = URL.createObjectURL(file);
+      img.onload = function () {
+        var w = img.naturalWidth || 1;
+        var h = img.naturalHeight || 1;
+        var scale = Math.min(1, (maxEdge || 1280) / Math.max(w, h));
+        var canvas = document.createElement("canvas");
+        canvas.width = Math.max(1, Math.round(w * scale));
+        canvas.height = Math.max(1, Math.round(h * scale));
+        canvas.getContext("2d").drawImage(img, 0, 0, canvas.width, canvas.height);
+        URL.revokeObjectURL(url);
+        resolve(canvas.toDataURL("image/jpeg", 0.9));
+      };
+      img.onerror = function () {
+        URL.revokeObjectURL(url);
+        reject(new Error("Could not read " + ((file && file.name) || "image")));
+      };
+      img.src = url;
+    });
+  }
+
+  function bindCatalogPage(b) {
+    bindCatalog();
+    bindDrop("filePerson", "dropPerson");
+    bindDrop("fileGarment", "dropGarment");
+    bindChips("catCategory");
+    bindChips("catPhotoType");
+    var pill = document.getElementById("workerPill");
+    var urlInput = document.getElementById("workerUrl");
+    var status = document.getElementById("catStatus");
+    pingWorker(workerUrlOf(b), pill);
+    fillModelSelect(workerUrlOf(b));
+    if (window.__catPing) clearInterval(window.__catPing);
+    window.__catPing = setInterval(function () { pingWorker(workerUrlOf(b), pill); }, 8000);
+
+    var exportBtn = document.getElementById("exportLog");
+    if (exportBtn) {
+      exportBtn.addEventListener("click", function () {
+        var rec = brandBy(state(), b.id);
+        var rows = catalogLogsOf(rec).map(function (e) {
+          return {
+            id: e.id,
+            createdAt: e.createdAt,
+            category: e.category,
+            garment_photo_type: e.garment_photo_type,
+            steps: e.steps,
+            rating: e.rating || 0,
+            note: e.note || ""
+          };
+        });
+        var blob = new Blob([JSON.stringify({ brand: rec.name, count: rows.length, looks: rows }, null, 2)],
+          { type: "application/json" });
+        var a = document.createElement("a");
+        a.href = URL.createObjectURL(blob);
+        a.download = "makeo-catalog-log-" + rec.id + ".json";
+        a.click();
+      });
+    }
+    document.querySelectorAll(".cat-rate").forEach(function (row) {
+      row.addEventListener("click", function (e) {
+        var btn = e.target.closest("[data-rate]");
+        if (!btn) return;
+        var st = state();
+        var rec = brandBy(st, b.id);
+        var id = row.getAttribute("data-id");
+        (rec.catalogLog || []).forEach(function (item) {
+          if (item.id === id) item.rating = Number(btn.getAttribute("data-rate"));
+        });
+        save(st);
+        b = rec;
+        render(shell(st, catalogPage(rec)));
+        bindCatalogPage(rec);
+      });
+    });
+
+    var saveBtn = document.getElementById("saveWorker");
+    var openBtn = document.getElementById("openWorker");
+    function syncOpen() {
+      var u = cleanWorkerUrl(urlInput && urlInput.value);
+      if (openBtn) openBtn.href = u || "#";
+    }
+    if (urlInput) urlInput.addEventListener("input", syncOpen);
+    syncOpen();
+    if (saveBtn) {
+      saveBtn.addEventListener("click", function () {
+        var typed = cleanWorkerUrl(urlInput.value);
+        if (urlInput) urlInput.value = typed;
+        var why = workerUrlError(typed);
+        if (why) {
+          if (status) status.innerHTML = '<span class="error">' + esc(why) + "</span>";
+          return;
+        }
+        var s = state();
+        var rec = brandBy(s, b.id);
+        rec.catalogWorkerUrl = typed;
+        save(s);
+        b = rec;
+        syncOpen();
+        pingWorker(workerUrlOf(b), pill);
+        try { window.open(typed, "makeo-colab-worker"); } catch (e) {}
+        if (status) {
+          var hint = typed.toLowerCase().indexOf("trycloudflare.com") >= 0
+            ? '<span class="error">Saved, but trycloudflare often shows error 1033. Paste the <code>colab.dev</code> URL that already loads JSON, then Save again.</span>'
+            : '<span class="ok">Saved. Leave that worker tab open. Drop photos and Create look.</span>';
+          status.innerHTML = hint;
+        }
+      });
+    }
+
+    var go = document.getElementById("catGo");
+    if (!go) return;
+    go.addEventListener("click", function () {
+      var s = state();
+      var rec = brandBy(s, b.id);
+      var base = workerUrlOf(rec);
+      var person = document.getElementById("filePerson").files[0];
+      var garment = document.getElementById("fileGarment").files[0];
+      var why = workerUrlError(base);
+      if (why) {
+        status.innerHTML = '<span class="error">' + esc(why) + "</span>";
+        return;
+      }
+      if (!person || !garment) {
+        status.innerHTML = '<span class="error">Add a model photo and a garment photo.</span>';
+        return;
+      }
+      go.disabled = true;
+      status.textContent = usesColabProxy(base)
+        ? "Opening the worker tab… it should say Waiting for Makeo, then Creating look (1–3 min). Allow pop-ups."
+        : "Sending to Colab… this can take 1–3 minutes.";
+      Promise.all([
+        fileToDataUrl(person, 1280),
+        fileToDataUrl(garment, 1280),
+        fileToDataUrl(person, 360),
+        fileToDataUrl(garment, 360)
+      ])
+        .then(function (imgs) {
+          var modelEl = document.getElementById("catModel");
+          var payload = {
+            person: imgs[0],
+            garment: imgs[1],
+            category: chipValue("catCategory") || "one-pieces",
+            garment_photo_type: chipValue("catPhotoType") || "flat-lay",
+            steps: 20,
+            model: (modelEl && modelEl.value) || "fashn-vton-1.5"
+          };
+          var send = usesColabProxy(base)
+            ? tryonViaWorkerUi(base, payload)
+            : tryonDirect(base, payload).catch(function (err) {
+                var msg = (err && err.message) || "";
+                if (msg.indexOf("Failed to fetch") >= 0 || msg.indexOf("NetworkError") >= 0 || msg.indexOf("Load failed") >= 0) {
+                  return tryonViaWorkerUi(base, payload);
+                }
+                throw err;
+              });
+          return send.then(function (dataUrl) {
+            return { dataUrl: dataUrl, payload: payload, person: imgs[2], garment: imgs[3] };
+          });
+        })
+        .then(function (pack) {
+          var st = state();
+          var brand = brandBy(st, b.id);
+          var entry = {
+            id: uid(),
+            url: pack.dataUrl,
+            person: pack.person,
+            garment: pack.garment,
+            category: pack.payload.category,
+            garment_photo_type: pack.payload.garment_photo_type,
+            steps: pack.payload.steps,
+            model: pack.payload.model,
+            rating: 0,
+            note: "",
+            createdAt: Date.now()
+          };
+          brand.catalogLog = (brand.catalogLog || []).concat([entry]);
+          if (brand.catalogLog.length > 40) brand.catalogLog = brand.catalogLog.slice(-40);
+          brand.catalogShots = brand.catalogLog.map(function (e) {
+            return { id: e.id, url: e.url, category: e.category, createdAt: e.createdAt };
+          });
+          save(st);
+          var box = document.getElementById("catResult");
+          if (box) box.innerHTML = '<img src="' + pack.dataUrl + '" alt="result"/>';
+          status.innerHTML = '<span class="ok">Look ready. Logged for quality review (this page + Colab <code>makeo_catalog_logs/</code>).</span>';
+          go.disabled = false;
+          render(shell(st, catalogPage(brand)));
+          bindCatalogPage(brand);
+        })
+        .catch(function (err) {
+          go.disabled = false;
+          var msg = (err && err.message) || "Could not reach Colab.";
+          if (msg.indexOf("Failed to fetch") >= 0 || msg.indexOf("NetworkError") >= 0 || msg.indexOf("Load failed") >= 0) {
+            status.innerHTML = workerBlockedHtml(base);
+            return;
+          }
+          status.innerHTML = '<span class="error">' + esc(msg) + "</span>";
+        });
     });
   }
 
@@ -840,16 +1677,53 @@
   }
 
   var timer = null;
+  var meTried = false;
   function render(html) { document.getElementById("app").innerHTML = html; }
+
+  function restoreMe(s, done) {
+    var base = apiUrl(s);
+    if (!base) {
+      done(s);
+      return;
+    }
+    fetch(base + "/v1/auth/me", { credentials: "include" }).then(function (r) {
+      return r.json();
+    }).then(function (j) {
+      if (j && j.ok && j.user) {
+        s.me = j.user;
+        s.session = j.user.id;
+      } else {
+        s.me = null;
+        s.session = null;
+      }
+      save(s);
+      done(s);
+    }).catch(function () { done(s); });
+  }
 
   function paint() {
     var s = state();
+    if (!meTried && apiUrl(s)) {
+      meTried = true;
+      restoreMe(s, function () { paint(); });
+      return;
+    }
     advanceJobs(s);
     save(s);
     var path = route();
     var parts = path.split("/").filter(Boolean);
 
-    if (path === "/logout") { s.session = null; save(s); go("/"); return; }
+    if (path === "/logout") {
+      var base = apiUrl(s);
+      s.session = null;
+      s.me = null;
+      save(s);
+      if (base) {
+        fetch(base + "/v1/auth/logout", { method: "POST", credentials: "include" }).catch(function () {});
+      }
+      go("/");
+      return;
+    }
     if (path === "/" || path === "/how") {
       render(shell(s, landing(), { landing: true }));
       return;
@@ -884,13 +1758,13 @@
       if (parts[2] === "keys") { render(shell(s, keysForm(b))); bindKeys(b); return; }
       if (parts[2] === "instagram") { render(shell(s, igForm(b))); bindIg(b); return; }
       if (parts[2] === "compose") {
-        if (!flowKeyOf(b)) {
-          render(shell(s, keysForm(b, "Enter your Google Flow key before generating a video.")));
-          bindKeys(b);
-          return;
-        }
         render(shell(s, compose(b)));
         bindCompose(b);
+        return;
+      }
+      if (parts[2] === "catalog") {
+        render(shell(s, catalogPage(b)));
+        bindCatalogPage(b);
         return;
       }
       if (parts[2] === "inbox") {
