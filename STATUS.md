@@ -4,10 +4,10 @@ This is the completion report for the [DESIGN.md](DESIGN.md) PR plan (PRs 1–12
 plus the leftover slice and the catalog experiment. It is meant to be read
 after the product [README](README.md).
 
-**Short answer:** the twelve design PRs are already on `main`. They were not
-re-done. One leftover pull request (RSS builder, no unbranded Makeo publish,
-OAuth-ready `auth_method`, caption-override test) is the only remaining
-design slice. Catalog virtual try-on is extra work on another branch.
+**Short answer:** the twelve design PRs are on `main`. They were not re-done.
+The leftover slice (RSS builder, no unbranded Makeo publish, OAuth-ready
+`auth_method`, caption-override test) is also on `main` via PR #1. Catalog
+virtual try-on is extra work on `explore-catalog-vton`.
 
 ---
 
@@ -81,8 +81,8 @@ days. `legacy/n8n-genz-daily.json` is unsupported.
 
 ## Leftover design slice (PR #1)
 
-GitHub: https://github.com/tmai-tech/Makeo/pull/1  
-Branch: `feat/pr3-leftovers`
+GitHub: https://github.com/tmai-tech/Makeo/pull/1 (merged)  
+Now on `main` as `be4e71e`.
 
 These were gaps **inside** PRs already merged, not new plan numbers:
 
@@ -141,6 +141,6 @@ Buzzit local path with no flags still works: `python daily.py --public`
 ## What “done” means
 
 - **Design plan PRs 1–12:** done on `main`. Do not re-implement them.
-- **Leftover slice:** this file + PR #1. Merge that PR to fold leftovers into `main`.
+- **Leftover slice:** merged to `main` in PR #1.
 - **Catalog try-on:** separate experiment; keep it on `explore-catalog-vton` until you want it on `main`.
 - **Not v1:** Meta OAuth, non-English Flow, team seats, billing, public signup.
