@@ -8,7 +8,8 @@ Instagram as a Reel.
 Nothing posts without a click. Rejecting publishes nothing.
 
 This repo is the product. The architecture and PR plan live in
-[`DESIGN.md`](DESIGN.md).
+[`DESIGN.md`](DESIGN.md). What actually shipped (PRs 1–12, leftovers, catalog
+lab) is in [`STATUS.md`](STATUS.md).
 
 **Public site (GitHub Pages):** **https://tmai-tech.github.io/Makeo/**
 

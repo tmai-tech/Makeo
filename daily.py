@@ -137,6 +137,11 @@ def main():
     cfg = bc.load(args.config) if args.config else None
     out_dir = args.out_dir
     job_id = os.environ.get("MAKEO_JOB_ID") or None
+    if args.no_brand and job_id:
+        sys.exit(
+            "MAKEO_JOB_ID runs cannot use --no-brand. "
+            "Makeo will not publish an unbranded Reel; PiP can be off via pip_enabled."
+        )
 
     if not args.skip_generate:
         if args.prompt or args.ask_prompt:
@@ -187,7 +192,7 @@ def main():
         sys.exit("no video for this job -- did flow_video.py fail?")
 
     if not args.no_brand:
-        print("\n=== 3/4 adding Buzzit end-card ===", flush=True)
+        print("\n=== 3/4 adding brand end-card ===", flush=True)
         cmd = ["brand.py", "--video", video]
         if args.screen:
             cmd += ["--screen", args.screen]

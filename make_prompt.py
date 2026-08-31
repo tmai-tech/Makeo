@@ -86,10 +86,29 @@ def recent_topics(history_dir=None, limit=10):
     return out
 
 
+def feed_urls(cfg=None):
+    """Config feeds if present, else locale query builder, else Buzzit defaults."""
+    if cfg is None:
+        return list(FEEDS)
+    if cfg.feeds:
+        return list(cfg.feeds)
+    return bc.build_feeds(cfg.locale, cfg.rss_query)
+
+
+def llm_prompt(cfg, titles, recent):
+    if cfg:
+        return cfg.format_instructions("\n".join(titles), recent)
+    return INSTRUCTIONS.format(
+        brand=BRAND, headlines="\n".join(titles), recent=recent)
+
+
 def headlines(limit=25, feeds=None):
     """Titles from both feeds, capped so the prompt stays cheap."""
     out = []
     for url in (feeds if feeds is not None else FEEDS):
+        if not bc.feed_host_allowed(url):
+            print(f"  warn: skip non-allowlisted feed: {url}", file=sys.stderr)
+            continue
         try:
             with urllib.request.urlopen(
                 urllib.request.Request(url, headers=UA), timeout=20
@@ -160,7 +179,7 @@ def main(argv=None):
     cfg = bc.load(args.config) if args.config else None
     out_dir = args.out_dir or HERE
     history_dir = args.history_dir or args.out_dir or (HERE / "out")
-    feeds = cfg.feeds if cfg else FEEDS
+    feeds = feed_urls(cfg)
     model = cfg.model if cfg else MODEL
     limit = cfg.headline_limit if cfg else 25
     dedup = cfg.dedup_max_topics if cfg else 10
@@ -181,11 +200,7 @@ def main(argv=None):
     recent = ("Already covered (do NOT repeat these):\n"
               + "\n".join(f"- {t}" for t in used) + "\n") if used else ""
 
-    if cfg:
-        prompt = cfg.format_instructions("\n".join(titles), recent)
-    else:
-        prompt = INSTRUCTIONS.format(
-            brand=BRAND, headlines="\n".join(titles), recent=recent)
+    prompt = llm_prompt(cfg, titles, recent)
 
     d = parse(gemini(prompt, key, model))
 

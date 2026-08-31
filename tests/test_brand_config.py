@@ -86,5 +86,23 @@ class Validation(unittest.TestCase):
             bc.load(p, repo_root=self.root)
 
 
+class FeedBuilder(unittest.TestCase):
+    def test_india_defaults(self):
+        urls = bc.build_feeds(bc.Locale(language="en-IN", region="IN"))
+        self.assertEqual(len(urls), 2)
+        self.assertTrue(urls[0].startswith("https://news.google.com/rss/search?"))
+        self.assertIn("gl=IN", urls[0])
+        self.assertIn("hl=en-IN", urls[0])
+        self.assertEqual(urls[1], "https://trends.google.com/trending/rss?geo=IN")
+        for u in urls:
+            self.assertTrue(bc.feed_host_allowed(u))
+
+    def test_other_region(self):
+        urls = bc.build_feeds(bc.Locale(language="en-GB", region="GB"), rss_query="when:1d+fashion")
+        self.assertIn("gl=GB", urls[0])
+        self.assertIn("when:1d+fashion", urls[0])
+        self.assertEqual(urls[1], "https://trends.google.com/trending/rss?geo=GB")
+
+
 if __name__ == "__main__":
     unittest.main()

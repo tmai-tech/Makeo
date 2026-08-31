@@ -66,6 +66,53 @@ class EnvPop(unittest.TestCase):
         os.environ.pop("GEMINI_API_KEY", None)
 
 
+class CaptionOverride(unittest.TestCase):
+    def test_publish_passes_override_not_sidecar(self):
+        with tempfile.TemporaryDirectory() as td:
+            conn = db.connect(Path(td) / "t.db")
+            uid = db.ensure_operator(conn)
+            bid = db.new_id()
+            conn.execute(
+                "INSERT INTO brands (id,user_id,slug,name,config,assets_dir,created_at) "
+                "VALUES (?,?,?,?,?,?,?)",
+                (bid, uid, "cap", "Cap", "{}", td, db.now()),
+            )
+            jid = db.insert_job(conn, brand_id=bid, user_id=uid, source="ui_custom",
+                                prompt="p", caption="sidecar-caption",
+                                status="publishing")
+            conn.execute(
+                "UPDATE jobs SET caption_override=?, video_relpath=? WHERE id=?",
+                ("override-caption", "out/flow-x.mp4", jid),
+            )
+            conn.commit()
+            job = db.get_job(conn, jid)
+            captured = {}
+
+            def fake_run(cmd, **kwargs):
+                captured["cmd"] = cmd
+                captured["env"] = kwargs.get("env") or {}
+                return mock.Mock(returncode=0, stdout="https://instagram.com/reel/x", stderr="")
+
+            with mock.patch.object(worker, "tenant_root", return_value=Path(td)), \
+                 mock.patch("makeo.media.url_for_job", return_value="https://example.test/v"), \
+                 mock.patch("subprocess.run", side_effect=fake_run):
+                worker.run_publish(conn, dict(job))
+            self.assertIn("--caption", captured["cmd"])
+            i = captured["cmd"].index("--caption")
+            self.assertEqual(captured["cmd"][i + 1], "override-caption")
+            self.assertNotIn("sidecar-caption", captured["cmd"])
+            conn.close()
+
+
+class AuthMethod(unittest.TestCase):
+    def test_ig_accounts_has_auth_method(self):
+        with tempfile.TemporaryDirectory() as td:
+            conn = db.connect(Path(td) / "t.db")
+            cols = {r[1] for r in conn.execute("PRAGMA table_info(ig_accounts)")}
+            self.assertIn("auth_method", cols)
+            conn.close()
+
+
 class Claim(unittest.TestCase):
     def test_publish_preferred_over_queued(self):
         with tempfile.TemporaryDirectory() as td:

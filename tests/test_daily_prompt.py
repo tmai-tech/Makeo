@@ -54,6 +54,53 @@ class HistoryDir(unittest.TestCase):
             self.assertNotIn("should-skip", used)
 
 
+class ConfigTemplate(unittest.TestCase):
+    def test_llm_prompt_uses_instructions_template(self):
+        cfg = type("C", (), {
+            "format_instructions": lambda self, h, r: f"TMPL|{h}|{r}",
+        })()
+        text = make_prompt.llm_prompt(cfg, ["Topic A"], "Already covered:\n- old")
+        self.assertTrue(text.startswith("TMPL|"))
+        self.assertIn("Topic A", text)
+        self.assertNotIn("You write ONE 8-second", text)
+
+    def test_no_config_keeps_repo_default(self):
+        text = make_prompt.llm_prompt(None, ["Topic A"], "")
+        self.assertIn("You write ONE 8-second", text)
+
+    def test_empty_feeds_use_locale_builder(self):
+        cfg = type("C", (), {
+            "feeds": [],
+            "locale": make_prompt.bc.Locale(language="en-IN", region="IN"),
+            "rss_query": "",
+        })()
+        urls = make_prompt.feed_urls(cfg)
+        self.assertTrue(all(make_prompt.bc.feed_host_allowed(u) for u in urls))
+        self.assertIn("geo=IN", urls[1])
+
+    def test_headlines_skip_ssrf_host(self):
+        titles = make_prompt.headlines(limit=5, feeds=["http://127.0.0.1/secret"])
+        self.assertEqual(titles, [])
+
+
+class NoUnbrandedJob(unittest.TestCase):
+    def test_job_id_rejects_no_brand(self):
+        import os
+        import subprocess
+        import sys
+        env = os.environ.copy()
+        env["MAKEO_JOB_ID"] = "job-unbranded"
+        r = subprocess.run(
+            [sys.executable, "daily.py", "--no-brand", "--skip-generate", "--skip-approve"],
+            cwd=str(Path(__file__).resolve().parents[1]),
+            env=env,
+            capture_output=True,
+            text=True,
+        )
+        self.assertNotEqual(r.returncode, 0)
+        self.assertIn("no-brand", (r.stderr or r.stdout or "").lower())
+
+
 class ResultContract(unittest.TestCase):
     def test_write_result(self):
         with tempfile.TemporaryDirectory() as td:
