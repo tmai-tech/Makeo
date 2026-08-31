@@ -426,6 +426,9 @@ def serve(pipe, port: int = PORT) -> str:
     for alt in urls[1:]:
         print(" also:", alt)
     print()
+    print("Confirm /ui in a tab:")
+    print(" ", public + "/ui")
+    print("That page must say Waiting for Makeo — not {\"detail\":\"Not Found\"}.")
     print("Leave this cell running. Keep this Colab tab open.")
     print("=" * 60 + "\n")
     try:

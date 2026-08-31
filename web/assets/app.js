@@ -1227,7 +1227,7 @@
         try { w.postMessage({ type: "ping" }, origin); } catch (e) {}
       }, 800);
       var limit = setTimeout(function () {
-        finish(new Error("Timed out waiting for the worker tab. Click through Cloudflare until you see “Waiting for Makeo”, keep that tab open, then try again."));
+        finish(new Error("Worker tab did not respond. If it shows {\"detail\":\"Not Found\"}, that Colab worker is too old. In Colab stop only the worker cell, run it again, wait for (json-v4), paste the new URL, then try again."));
       }, 4 * 60 * 1000);
     });
   }
