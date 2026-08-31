@@ -461,8 +461,8 @@
       "<main>" + inner + "</main>" +
       "<footer><p>" +
       (preview
-        ? 'Preview · <a href="https://tmai-tech.github.io/Makeo/preview/fal/">/preview/fal/</a>'
-        : 'Live at <a href="https://tmai-tech.github.io/Makeo/">tmai-tech.github.io/Makeo</a>') +
+        ? 'Preview · atelier2 · <a href="https://tmai-tech.github.io/Makeo/preview/fal/?v=atelier2">/preview/fal/</a>'
+        : 'Studio UI · atelier2 · <a href="https://tmai-tech.github.io/Makeo/?v=atelier2">tmai-tech.github.io/Makeo</a>') +
       "</p></footer>"
     );
   }
