@@ -1111,6 +1111,7 @@
             "</div>" +
             '<p class="cat-log-meta">' + esc(s.category || "") +
             (s.garment_photo_type ? " · " + esc(s.garment_photo_type) : "") +
+            (s.model ? " · " + esc(s.model) : "") +
             (s.steps ? " · " + s.steps + " steps" : "") +
             "<br/>" + esc(when) + "</p>" +
             '<div class="cat-rate" data-id="' + esc(s.id) + '">' +
@@ -1150,6 +1151,15 @@
       '<label>Garment photo</label><div class="chips" id="catPhotoType">' +
       '<button type="button" class="chip on" data-v="flat-lay">Flat-lay / hanger</button>' +
       '<button type="button" class="chip" data-v="model">Already on a person</button></div>' +
+      '<label>Try-on model</label>' +
+      '<select id="catModel">' +
+      '<option value="fashn-vton-1.5">FASHN VTON 1.5 · Apache · T4 default</option>' +
+      '<option value="idm-vton">IDM-VTON · best single garment · non-commercial</option>' +
+      '<option value="catvton">CatVTON · ICLR 2025 · light</option>' +
+      '<option value="leffa">Leffa · fabric / pose</option>' +
+      '<option value="kolors">Kolors Virtual Try-On · most-used HF Space</option>' +
+      "</select>" +
+      '<p class="muted" id="catModelNote">FASHN runs on your Colab T4. The others use their official Hugging Face Spaces from that same worker.</p>' +
       '<div class="row">' +
       '<button type="button" class="btn primary" id="catGo">Create look</button>' +
       '<a class="btn ghost" href="#/brands/' + b.id + '/compose">Back to video</a>' +
@@ -1207,6 +1217,31 @@
       pill.className = "worker bad";
       pill.textContent = "Open worker URL once";
     });
+  }
+
+  function fillModelSelect(url) {
+    var sel = document.getElementById("catModel");
+    var note = document.getElementById("catModelNote");
+    if (!sel || !url) return;
+    fetch(url + "/models", { mode: "cors", cache: "no-store", credentials: "omit" }).then(function (r) {
+      return r.json();
+    }).then(function (d) {
+      if (!d || !d.models || !d.models.length) return;
+      var cur = sel.value;
+      sel.innerHTML = d.models.map(function (m) {
+        var label = (m.name || m.id) + (m.license ? " · " + m.license : "") + (m.where ? " · " + m.where : "");
+        return '<option value="' + esc(m.id) + '">' + esc(label) + "</option>";
+      }).join("");
+      if (cur && sel.querySelector('option[value="' + cur + '"]')) sel.value = cur;
+      else if (d.current) sel.value = d.current;
+      function showNote() {
+        var spec = null;
+        d.models.forEach(function (m) { if (m.id === sel.value) spec = m; });
+        if (note && spec) note.textContent = spec.note || "";
+      }
+      sel.onchange = showNote;
+      showNote();
+    }).catch(function () {});
   }
 
   function workerBlockedHtml(url) {
@@ -1337,6 +1372,7 @@
     var urlInput = document.getElementById("workerUrl");
     var status = document.getElementById("catStatus");
     pingWorker(workerUrlOf(b), pill);
+    fillModelSelect(workerUrlOf(b));
     if (window.__catPing) clearInterval(window.__catPing);
     window.__catPing = setInterval(function () { pingWorker(workerUrlOf(b), pill); }, 8000);
 
@@ -1442,12 +1478,14 @@
         fileToDataUrl(garment, 360)
       ])
         .then(function (imgs) {
+          var modelEl = document.getElementById("catModel");
           var payload = {
             person: imgs[0],
             garment: imgs[1],
             category: chipValue("catCategory") || "one-pieces",
             garment_photo_type: chipValue("catPhotoType") || "flat-lay",
-            steps: 20
+            steps: 20,
+            model: (modelEl && modelEl.value) || "fashn-vton-1.5"
           };
           var send = usesColabProxy(base)
             ? tryonViaWorkerUi(base, payload)
@@ -1473,6 +1511,7 @@
             category: pack.payload.category,
             garment_photo_type: pack.payload.garment_photo_type,
             steps: pack.payload.steps,
+            model: pack.payload.model,
             rating: 0,
             note: "",
             createdAt: Date.now()

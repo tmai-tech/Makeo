@@ -39,6 +39,18 @@ class ParseTryonPayload(unittest.TestCase):
         self.assertEqual(got["garment"], raw)
         self.assertEqual(got["category"], "tops")
         self.assertEqual(got["steps"], 20)
+        self.assertEqual(got["model"], "fashn-vton-1.5")
+
+    def test_rejects_unknown_model(self):
+        raw = base64.b64encode(b"x").decode()
+        with self.assertRaises(ValueError):
+            parse_tryon_payload({"person": raw, "garment": raw, "model": "nope"})
+
+    def test_five_hf_models(self):
+        ids = [m["id"] for m in colab_worker.MODEL_SPECS]
+        self.assertEqual(len(ids), 5)
+        for need in ("fashn-vton-1.5", "idm-vton", "catvton", "leffa", "kolors"):
+            self.assertIn(need, ids)
 
     def test_missing_images(self):
         with self.assertRaises(ValueError):

@@ -61,6 +61,7 @@ def write_quality_log(
     seed: int,
     elapsed_ms: int = 0,
     error: str | None = None,
+    model: str = "fashn-vton-1.5",
     root: Path | None = None,
 ) -> dict:
     """Write one try-on (inputs + result + settings) for quality review."""
@@ -81,6 +82,7 @@ def write_quality_log(
         "steps": steps,
         "guidance": guidance,
         "seed": seed,
+        "model": model,
         "elapsed_ms": elapsed_ms,
         "created_at": datetime.now(timezone.utc).isoformat(),
         "dir": str(dest),
@@ -148,6 +150,9 @@ def parse_tryon_payload(data):
         seed = int(data.get("seed", 42))
     except (TypeError, ValueError) as e:
         raise ValueError("guidance and seed must be numbers") from e
+    model = str(data.get("model") or "fashn-vton-1.5").strip()
+    if model not in MODEL_IDS:
+        raise ValueError("model must be one of: " + ", ".join(MODEL_IDS))
     return {
         "person": decode_image_field(str(person)),
         "garment": decode_image_field(str(garment)),
@@ -156,7 +161,212 @@ def parse_tryon_payload(data):
         "steps": steps,
         "guidance": guidance,
         "seed": seed,
+        "model": model,
     }
+
+
+# Hugging Face ranking (Spaces likes / citations / T4 feasibility, 2026):
+# IDM-VTON ~2k Space likes, CatVTON 100+ Spaces, Kolors ~10k Space likes,
+# Leffa ~600, FASHN Apache-2 and T4-native.
+MODEL_SPECS = [
+    {
+        "id": "fashn-vton-1.5",
+        "name": "FASHN VTON 1.5",
+        "hf": "fashn-ai/fashn-vton-1.5",
+        "license": "Apache-2.0",
+        "vram": "~8 GB",
+        "where": "local T4",
+        "note": "Default. Mask-free, good print / pallu / zari. Commercial OK.",
+    },
+    {
+        "id": "idm-vton",
+        "name": "IDM-VTON",
+        "hf": "yisol/IDM-VTON",
+        "license": "CC-BY-NC-SA-4.0",
+        "vram": "~16–24 GB",
+        "where": "Hugging Face Space",
+        "note": "Highest single-garment fidelity. Non-commercial. Too heavy for a free T4.",
+        "space": "yisol/IDM-VTON",
+    },
+    {
+        "id": "catvton",
+        "name": "CatVTON",
+        "hf": "zhengchong/CatVTON",
+        "license": "CC-BY-NC-SA-4.0",
+        "vram": "~8 GB",
+        "where": "local T4 or Space",
+        "note": "ICLR 2025. Light, any category. Non-commercial.",
+        "space": "zhengchong/CatVTON",
+    },
+    {
+        "id": "leffa",
+        "name": "Leffa",
+        "hf": "franciszzj/Leffa",
+        "license": "Apache-2.0",
+        "vram": "~8 GB",
+        "where": "Hugging Face Space",
+        "note": "Strong fabric / pose swap. Official Space from this Colab.",
+        "space": "franciszzj/Leffa",
+    },
+    {
+        "id": "kolors",
+        "name": "Kolors Virtual Try-On",
+        "hf": "Kwai-Kolors/Kolors-Virtual-Try-On",
+        "license": "Kolors (see card)",
+        "vram": "Space GPU",
+        "where": "Hugging Face Space",
+        "note": "Most-used HF try-on Space. Runs on ZeroGPU from this worker.",
+        "space": "Kwai-Kolors/Kolors-Virtual-Try-On",
+    },
+]
+MODEL_IDS = [m["id"] for m in MODEL_SPECS]
+MODEL_BY_ID = {m["id"]: m for m in MODEL_SPECS}
+
+
+def _save_tmp_png(image, name):
+    import tempfile
+    from PIL import Image as PILImage
+    if not isinstance(image, PILImage.Image):
+        image = PILImage.open(io.BytesIO(image)).convert("RGB")
+    path = Path(tempfile.mkdtemp()) / name
+    image.save(path, format="PNG")
+    return path
+
+
+def _space_tryon(space: str, person_im, garment_im, category: str):
+    """Call an official Hugging Face Space. Signatures differ; try common ones."""
+    try:
+        from gradio_client import Client, handle_file
+    except ImportError:
+        subprocess.check_call([sys.executable, "-m", "pip", "install", "-q", "gradio_client"])
+        from gradio_client import Client, handle_file
+    pf = _save_tmp_png(person_im, "person.png")
+    gf = _save_tmp_png(garment_im, "garment.png")
+    person_f = handle_file(str(pf))
+    garm_f = handle_file(str(gf))
+    client = Client(space)
+    cloth = "upper_body" if category == "tops" else ("lower_body" if category == "bottoms" else "dresses")
+    attempts = [
+        lambda: client.predict(person_f, garm_f, api_name="/tryon"),
+        lambda: client.predict(person_f, garm_f, garm_f, True, False, 30, 42, api_name="/tryon"),
+        lambda: client.predict(person_f, garm_f, cloth, api_name="/process"),
+        lambda: client.predict(person_f, garm_f, api_name="/predict"),
+        lambda: client.predict(person_f, garm_f),
+    ]
+    last = None
+    for fn in attempts:
+        try:
+            out = fn()
+            last = None
+            break
+        except Exception as e:
+            last = e
+            out = None
+    if out is None:
+        raise RuntimeError(f"{space} did not accept the try-on call: {last}")
+    path = _first_image_path(out)
+    from PIL import Image as PILImage
+    return PILImage.open(path).convert("RGB")
+
+
+def _first_image_path(out):
+    if isinstance(out, (list, tuple)):
+        for item in out:
+            p = _first_image_path(item)
+            if p:
+                return p
+        raise RuntimeError("Space returned no image")
+    if isinstance(out, dict):
+        for key in ("path", "name", "value"):
+            if out.get(key) and str(out[key]).lower().endswith((".png", ".jpg", ".jpeg", ".webp")):
+                return out[key]
+        if out.get("path"):
+            return out["path"]
+        raise RuntimeError("Space returned no image path")
+    s = str(out)
+    if s.lower().endswith((".png", ".jpg", ".jpeg", ".webp")):
+        return s
+    raise RuntimeError(f"unexpected Space output: {type(out)}")
+
+
+class ModelHub:
+    """One active try-on model. FASHN stays on the T4; others use HF Spaces if VRAM is tight."""
+
+    def __init__(self, fashn_pipe=None):
+        self.fashn_pipe = fashn_pipe
+        self.current = "fashn-vton-1.5" if fashn_pipe is not None else None
+        self._catvton = None
+
+    def list_models(self):
+        return [dict(m) for m in MODEL_SPECS]
+
+    def run(self, person_im, garment_im, model, category, garment_photo_type, steps, guidance, seed):
+        spec = MODEL_BY_ID[model]
+        self.current = model
+        if model == "fashn-vton-1.5":
+            if self.fashn_pipe is None:
+                raise RuntimeError("FASHN pipeline is not loaded — run the Load pipeline cell")
+            result = self.fashn_pipe(
+                person_image=person_im,
+                garment_image=garment_im,
+                category=category,
+                garment_photo_type=garment_photo_type,
+                num_samples=1,
+                num_timesteps=steps,
+                guidance_scale=guidance,
+                seed=seed,
+                segmentation_free=True,
+            )
+            return result.images[0]
+        if model == "catvton":
+            try:
+                return self._run_catvton(person_im, garment_im, category, steps, seed)
+            except Exception as e:
+                print("CatVTON local failed, trying Space:", e, flush=True)
+                return _space_tryon(spec["space"], person_im, garment_im, category)
+        return _space_tryon(spec["space"], person_im, garment_im, category)
+
+    def _run_catvton(self, person_im, garment_im, category, steps, seed):
+        import torch
+        repo = Path("/content/CatVTON")
+        if not (repo / "model").is_dir():
+            subprocess.check_call(
+                ["git", "clone", "--depth", "1", "https://github.com/Zheng-Chong/CatVTON.git", str(repo)]
+            )
+        if str(repo) not in sys.path:
+            sys.path.insert(0, str(repo))
+        if self._catvton is None:
+            subprocess.check_call(
+                [sys.executable, "-m", "pip", "install", "-q", "diffusers", "accelerate", "transformers"]
+            )
+            from model.pipeline import CatVTONPipeline
+            dtype = torch.float32 if torch.cuda.get_device_capability(0)[0] < 8 else torch.float16
+            self._catvton = CatVTONPipeline(
+                base_ckpt="booksforcharlie/stable-diffusion-inpainting",
+                attn_ckpt="zhengchong/CatVTON",
+                attn_ckpt_version="mix",
+                weight_dtype=dtype,
+                device="cuda",
+                skip_safety_check=True,
+            )
+        cloth = "upper" if category == "tops" else ("lower" if category == "bottoms" else "overall")
+        mask = None
+        try:
+            from model.cloth_masker import AutoMasker
+            masker = AutoMasker(device="cuda")
+            mask = masker(person_im, cloth_type=cloth)["mask"]
+        except Exception as e:
+            print("CatVTON automask skipped:", e, flush=True)
+        out = self._catvton(
+            image=person_im,
+            condition_image=garment_im,
+            mask=mask,
+            num_inference_steps=min(int(steps), 50),
+            generator=torch.Generator(device="cuda").manual_seed(int(seed)),
+        )
+        if isinstance(out, (list, tuple)):
+            return out[0]
+        return out
 
 
 def _free_port(start: int = PORT) -> int:
@@ -273,6 +483,7 @@ WORKER_UI_HTML = """<!DOCTYPE html>
 
 
 def build_app(pipe):
+    hub = pipe if isinstance(pipe, ModelHub) else ModelHub(fashn_pipe=pipe)
     from fastapi import FastAPI, HTTPException, Request
     from fastapi.middleware.cors import CORSMiddleware
     from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, Response
@@ -300,11 +511,21 @@ def build_app(pipe):
         accept = (request.headers.get("accept") or "").lower()
         if "text/html" in accept or request.query_params.get("ui"):
             return HTMLResponse(WORKER_UI_HTML)
-        return {"ok": True, "service": "makeo-catalog-vton", "ready": pipe is not None}
+        return {
+            "ok": True,
+            "service": "makeo-catalog-vton",
+            "ready": hub.fashn_pipe is not None,
+            "model": hub.current,
+            "models": [m["id"] for m in MODEL_SPECS],
+        }
 
     @app.get("/health")
     def health():
-        return {"ok": True, "ready": pipe is not None}
+        return {"ok": True, "ready": True, "model": hub.current}
+
+    @app.get("/models")
+    def models():
+        return {"ok": True, "current": hub.current, "models": hub.list_models()}
 
     @app.get("/ui")
     def ui():
@@ -334,18 +555,16 @@ def build_app(pipe):
         error = None
         png = None
         try:
-            result = pipe(
-                person_image=person_im,
-                garment_image=garment_im,
+            image = hub.run(
+                person_im,
+                garment_im,
+                model=payload["model"],
                 category=payload["category"],
                 garment_photo_type=payload["garment_photo_type"],
-                num_samples=1,
-                num_timesteps=payload["steps"],
-                guidance_scale=payload["guidance"],
+                steps=payload["steps"],
+                guidance=payload["guidance"],
                 seed=payload["seed"],
-                segmentation_free=True,
             )
-            image = result.images[0]
             buf = io.BytesIO()
             image.save(buf, format="PNG")
             png = buf.getvalue()
@@ -368,6 +587,7 @@ def build_app(pipe):
                     steps=payload["steps"],
                     guidance=payload["guidance"],
                     seed=payload["seed"],
+                    model=payload.get("model") or "fashn-vton-1.5",
                     elapsed_ms=int((time.time() - started) * 1000),
                     error=error,
                 )

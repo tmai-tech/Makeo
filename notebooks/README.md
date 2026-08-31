@@ -29,10 +29,20 @@ https://colab.research.google.com/github/tmai-tech/Makeo/blob/<branch-or-sha>/no
 4. Leave the Colab tab open. The last cell must keep running.
 
 Every look is written to a quality log: person, garment, result, category,
-steps, seed, and elapsed time. On Colab that is
+steps, seed, model, and elapsed time. On Colab that is
 `/content/makeo_catalog_logs/` (or `MyDrive/makeo_catalog_logs` if Drive is
 mounted). Makeo’s Catalog page keeps a matching history with 1–5 ratings and
 **Download log JSON**.
+
+Catalog has a **model dropdown**. The five Hugging Face try-on models:
+
+| id | Hugging Face | On T4 |
+|---|---|---|
+| `fashn-vton-1.5` | [fashn-ai/fashn-vton-1.5](https://huggingface.co/fashn-ai/fashn-vton-1.5) | Local (default) |
+| `idm-vton` | [yisol/IDM-VTON](https://huggingface.co/yisol/IDM-VTON) | Official Space (T4 too small) |
+| `catvton` | [zhengchong/CatVTON](https://huggingface.co/zhengchong/CatVTON) | Local, Space fallback |
+| `leffa` | [franciszzj/Leffa](https://huggingface.co/franciszzj/Leffa) | Official Space |
+| `kolors` | [Kwai-Kolors/Kolors-Virtual-Try-On](https://huggingface.co/spaces/Kwai-Kolors/Kolors-Virtual-Try-On) | Official Space |
 
 ## From the Makeo generator
 
