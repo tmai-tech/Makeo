@@ -1083,14 +1083,44 @@
     return "";
   }
 
+  function catalogLogsOf(b) {
+    if (b.catalogLog && b.catalogLog.length) return b.catalogLog.slice();
+    return (b.catalogShots || []).map(function (s) {
+      return {
+        id: s.id, url: s.url, category: s.category, createdAt: s.createdAt,
+        garment_photo_type: "", rating: 0, note: ""
+      };
+    });
+  }
+
   function catalogPage(b, note) {
-    var shots = (b.catalogShots || []).slice().reverse();
-    var gallery = shots.length
-      ? '<h2>Looks</h2><div class="cat-shots">' + shots.map(function (s) {
-          return '<a href="' + s.url + '" download="makeo-catalog-' + esc(s.id) + '.png" title="' +
-            esc(s.category || "") + '"><img src="' + s.url + '" alt="catalog look"/></a>';
+    var logs = catalogLogsOf(b).slice().reverse();
+    var gallery = logs.length
+      ? '<div class="cat-log-head"><h2>Quality log · ' + logs.length + '</h2>' +
+        '<button type="button" class="btn ghost" id="exportLog">Download log JSON</button></div>' +
+        '<p class="muted">Every look is also written on the Colab machine under <code>makeo_catalog_logs/</code> (Drive if you mounted it).</p>' +
+        '<div class="cat-log">' + logs.map(function (s) {
+          var when = s.createdAt ? new Date(s.createdAt).toLocaleString() : "";
+          var rate = Number(s.rating || 0);
+          return '<article class="cat-log-card" data-id="' + esc(s.id) + '">' +
+            '<a href="' + s.url + '" download="makeo-catalog-' + esc(s.id) + '.png">' +
+            '<img src="' + s.url + '" alt="result"/></a>' +
+            '<div class="cat-log-refs">' +
+            (s.person ? '<img src="' + s.person + '" alt="model"/>' : "") +
+            (s.garment ? '<img src="' + s.garment + '" alt="garment"/>' : "") +
+            "</div>" +
+            '<p class="cat-log-meta">' + esc(s.category || "") +
+            (s.garment_photo_type ? " · " + esc(s.garment_photo_type) : "") +
+            (s.steps ? " · " + s.steps + " steps" : "") +
+            "<br/>" + esc(when) + "</p>" +
+            '<div class="cat-rate" data-id="' + esc(s.id) + '">' +
+            [1, 2, 3, 4, 5].map(function (n) {
+              return '<button type="button" class="chip' + (rate === n ? " on" : "") +
+                '" data-rate="' + n + '">' + n + "</button>";
+            }).join("") +
+            "</div></article>";
         }).join("") + "</div>"
-      : '<p class="muted">No looks yet. Connect Colab, drop a model and a garment, then create.</p>';
+      : '<p class="muted">No looks yet. Connect Colab, drop a model and a garment, then create. Each result is logged for quality review.</p>';
     return (
       '<div class="cat-head">' +
       "<div><h1>Catalog · " + esc(b.name) + "</h1>" +
@@ -1303,6 +1333,46 @@
     if (window.__catPing) clearInterval(window.__catPing);
     window.__catPing = setInterval(function () { pingWorker(workerUrlOf(b), pill); }, 8000);
 
+    var exportBtn = document.getElementById("exportLog");
+    if (exportBtn) {
+      exportBtn.addEventListener("click", function () {
+        var rec = brandBy(state(), b.id);
+        var rows = catalogLogsOf(rec).map(function (e) {
+          return {
+            id: e.id,
+            createdAt: e.createdAt,
+            category: e.category,
+            garment_photo_type: e.garment_photo_type,
+            steps: e.steps,
+            rating: e.rating || 0,
+            note: e.note || ""
+          };
+        });
+        var blob = new Blob([JSON.stringify({ brand: rec.name, count: rows.length, looks: rows }, null, 2)],
+          { type: "application/json" });
+        var a = document.createElement("a");
+        a.href = URL.createObjectURL(blob);
+        a.download = "makeo-catalog-log-" + rec.id + ".json";
+        a.click();
+      });
+    }
+    document.querySelectorAll(".cat-rate").forEach(function (row) {
+      row.addEventListener("click", function (e) {
+        var btn = e.target.closest("[data-rate]");
+        if (!btn) return;
+        var st = state();
+        var rec = brandBy(st, b.id);
+        var id = row.getAttribute("data-id");
+        (rec.catalogLog || []).forEach(function (item) {
+          if (item.id === id) item.rating = Number(btn.getAttribute("data-rate"));
+        });
+        save(st);
+        b = rec;
+        render(shell(st, catalogPage(rec)));
+        bindCatalogPage(rec);
+      });
+    });
+
     var saveBtn = document.getElementById("saveWorker");
     var openBtn = document.getElementById("openWorker");
     function syncOpen() {
@@ -1356,11 +1426,16 @@
       }
       go.disabled = true;
       status.textContent = "Sending to Colab… this can take 1–3 minutes.";
-      Promise.all([fileToDataUrl(person, 1280), fileToDataUrl(garment, 1280)])
-        .then(function (pair) {
+      Promise.all([
+        fileToDataUrl(person, 1280),
+        fileToDataUrl(garment, 1280),
+        fileToDataUrl(person, 360),
+        fileToDataUrl(garment, 360)
+      ])
+        .then(function (imgs) {
           var payload = {
-            person: pair[0],
-            garment: pair[1],
+            person: imgs[0],
+            garment: imgs[1],
             category: chipValue("catCategory") || "one-pieces",
             garment_photo_type: chipValue("catPhotoType") || "flat-lay",
             steps: 20
@@ -1372,24 +1447,34 @@
               return tryonViaWorkerUi(base, payload);
             }
             throw err;
+          }).then(function (dataUrl) {
+            return { dataUrl: dataUrl, payload: payload, person: imgs[2], garment: imgs[3] };
           });
         })
-        .then(function (dataUrl) {
+        .then(function (pack) {
           var st = state();
           var brand = brandBy(st, b.id);
-          brand.catalogShots = brand.catalogShots || [];
-          var shot = {
+          var entry = {
             id: uid(),
-            url: dataUrl,
-            category: chipValue("catCategory") || "one-pieces",
+            url: pack.dataUrl,
+            person: pack.person,
+            garment: pack.garment,
+            category: pack.payload.category,
+            garment_photo_type: pack.payload.garment_photo_type,
+            steps: pack.payload.steps,
+            rating: 0,
+            note: "",
             createdAt: Date.now()
           };
-          brand.catalogShots.push(shot);
-          if (brand.catalogShots.length > 12) brand.catalogShots = brand.catalogShots.slice(-12);
+          brand.catalogLog = (brand.catalogLog || []).concat([entry]);
+          if (brand.catalogLog.length > 40) brand.catalogLog = brand.catalogLog.slice(-40);
+          brand.catalogShots = brand.catalogLog.map(function (e) {
+            return { id: e.id, url: e.url, category: e.category, createdAt: e.createdAt };
+          });
           save(st);
           var box = document.getElementById("catResult");
-          if (box) box.innerHTML = '<img src="' + dataUrl + '" alt="result"/>';
-          status.innerHTML = '<span class="ok">Look ready. Saved to this brand’s catalog.</span>';
+          if (box) box.innerHTML = '<img src="' + pack.dataUrl + '" alt="result"/>';
+          status.innerHTML = '<span class="ok">Look ready. Logged for quality review (this page + Colab <code>makeo_catalog_logs/</code>).</span>';
           go.disabled = false;
           render(shell(st, catalogPage(brand)));
           bindCatalogPage(brand);

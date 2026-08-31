@@ -45,6 +45,51 @@ class ParseTryonPayload(unittest.TestCase):
             parse_tryon_payload({"person": "xxxx"})
 
 
+class QualityLog(unittest.TestCase):
+    def test_writes_inputs_result_and_index(self):
+        import tempfile
+        from pathlib import Path
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            png = bytes.fromhex(
+                "89504e470d0a1a0a0000000d49484452000000010000000108060000001f15c489"
+                "0000000a49444154789c63000100000500010d0a2db40000000049454e44ae426082"
+            )
+            meta = colab_worker.write_quality_log(
+                person=b"person-bytes",
+                garment=b"garment-bytes",
+                result_png=png,
+                category="one-pieces",
+                garment_photo_type="flat-lay",
+                steps=20,
+                guidance=1.5,
+                seed=42,
+                elapsed_ms=12,
+                root=root,
+            )
+            dest = root / meta["id"]
+            self.assertTrue((dest / "person.jpg").is_file())
+            self.assertTrue((dest / "garment.jpg").is_file())
+            self.assertTrue((dest / "result.png").is_file())
+            self.assertTrue((dest / "meta.json").is_file())
+            listed = colab_worker.list_quality_logs(root=root)
+            self.assertEqual(len(listed), 1)
+            self.assertEqual(listed[0]["category"], "one-pieces")
+            self.assertTrue(listed[0]["ok"])
+
+    def test_failure_is_logged(self):
+        import tempfile
+        from pathlib import Path
+        with tempfile.TemporaryDirectory() as td:
+            meta = colab_worker.write_quality_log(
+                person=b"p", garment=b"g", result_png=None,
+                category="tops", garment_photo_type="model",
+                steps=10, guidance=1.0, seed=1, error="oom", root=Path(td),
+            )
+            self.assertFalse(meta["ok"])
+            self.assertEqual(meta["error"], "oom")
+
+
 class WorkerUiPage(unittest.TestCase):
     def test_bridge_page(self):
         html = colab_worker.WORKER_UI_HTML

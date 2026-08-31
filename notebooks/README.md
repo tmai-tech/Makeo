@@ -28,6 +28,12 @@ https://colab.research.google.com/github/tmai-tech/Makeo/blob/<branch-or-sha>/no
 3. Stay on Makeo. Drop a model + garment → **Create look** (1–3 min).
 4. Leave the Colab tab open. The last cell must keep running.
 
+Every look is written to a quality log: person, garment, result, category,
+steps, seed, and elapsed time. On Colab that is
+`/content/makeo_catalog_logs/` (or `MyDrive/makeo_catalog_logs` if Drive is
+mounted). Makeo’s Catalog page keeps a matching history with 1–5 ratings and
+**Download log JSON**.
+
 ## From the Makeo generator
 
 Generate → **Start Colab** opens this notebook in a **new tab**. Makeo stays put.

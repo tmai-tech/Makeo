@@ -107,6 +107,17 @@ thumb { }
 .cat-shots { display:grid; gap:12px; grid-template-columns:repeat(auto-fill, minmax(140px, 1fr)); margin-top:16px; }
 .cat-shots a { display:block; aspect-ratio:2/3; border-radius:10px; overflow:hidden; border:1px solid var(--line); }
 .cat-shots img { width:100%; height:100%; object-fit:cover; }
+.cat-log-head { display:flex; justify-content:space-between; align-items:center; gap:12px; flex-wrap:wrap; margin-top:28px; }
+.cat-log-head h2 { margin:0; }
+.cat-log { display:grid; gap:16px; grid-template-columns:repeat(auto-fill, minmax(180px, 1fr)); margin-top:12px; }
+.cat-log-card { background:#161616; border:1px solid var(--line); border-radius:12px; overflow:hidden; padding:0 0 10px; }
+.cat-log-card > a { display:block; aspect-ratio:2/3; }
+.cat-log-card > a img { width:100%; height:100%; object-fit:cover; }
+.cat-log-refs { display:flex; gap:6px; padding:8px 8px 0; }
+.cat-log-refs img { width:44px; height:44px; object-fit:cover; border-radius:6px; border:1px solid var(--line); }
+.cat-log-meta { color:var(--mut); font-size:0.8rem; padding:6px 8px 0; margin:0; }
+.cat-rate { display:flex; gap:4px; padding:8px; flex-wrap:wrap; }
+.cat-rate .chip { padding:2px 8px; font-size:0.8rem; }
 .worker-row input { flex:1; min-width:180px; }
 .how { display: grid; gap: 16px; margin: 20px 0 32px; }
 .how-step { background: var(--card); border-radius: 16px; padding: 16px 18px 18px; }

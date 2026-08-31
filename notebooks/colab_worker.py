@@ -10,6 +10,7 @@ Leave this cell running. Do not close the Colab tab.
 """
 import base64
 import io
+import json
 import re
 import socket
 import stat
@@ -18,11 +19,91 @@ import sys
 import threading
 import time
 import urllib.request
+import uuid
+from datetime import datetime, timezone
 from pathlib import Path
 
 PORT = 8766
 CF_BIN = Path("/tmp/cloudflared")
 MAX_IMAGE_BYTES = 10 * 1024 * 1024
+LOG_SAFE_FILES = frozenset({"meta.json", "person.jpg", "garment.jpg", "result.png"})
+
+
+def quality_log_dir(root: Path | None = None) -> Path:
+    """Prefer Drive if the user already mounted it; else /content; else /tmp."""
+    if root is not None:
+        root.mkdir(parents=True, exist_ok=True)
+        return root
+    drive = Path("/content/drive/MyDrive/makeo_catalog_logs")
+    if Path("/content/drive/MyDrive").is_dir():
+        drive.mkdir(parents=True, exist_ok=True)
+        return drive
+    for cand in (Path("/content/makeo_catalog_logs"), Path.home() / "makeo_catalog_logs"):
+        try:
+            cand.mkdir(parents=True, exist_ok=True)
+            return cand
+        except OSError:
+            continue
+    fallback = Path("/tmp/makeo_catalog_logs")
+    fallback.mkdir(parents=True, exist_ok=True)
+    return fallback
+
+
+def write_quality_log(
+    *,
+    person: bytes,
+    garment: bytes,
+    result_png: bytes | None,
+    category: str,
+    garment_photo_type: str,
+    steps: int,
+    guidance: float,
+    seed: int,
+    elapsed_ms: int = 0,
+    error: str | None = None,
+    root: Path | None = None,
+) -> dict:
+    """Write one try-on (inputs + result + settings) for quality review."""
+    base = quality_log_dir(root)
+    run_id = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ") + "-" + uuid.uuid4().hex[:8]
+    dest = base / run_id
+    dest.mkdir(parents=True, exist_ok=True)
+    (dest / "person.jpg").write_bytes(person)
+    (dest / "garment.jpg").write_bytes(garment)
+    if result_png:
+        (dest / "result.png").write_bytes(result_png)
+    meta = {
+        "id": run_id,
+        "ok": error is None and bool(result_png),
+        "error": error,
+        "category": category,
+        "garment_photo_type": garment_photo_type,
+        "steps": steps,
+        "guidance": guidance,
+        "seed": seed,
+        "elapsed_ms": elapsed_ms,
+        "created_at": datetime.now(timezone.utc).isoformat(),
+        "dir": str(dest),
+    }
+    (dest / "meta.json").write_text(json.dumps(meta, indent=2), encoding="utf-8")
+    with (base / "index.jsonl").open("a", encoding="utf-8") as fh:
+        fh.write(json.dumps(meta, separators=(",", ":")) + "\n")
+    return meta
+
+
+def list_quality_logs(limit: int = 50, root: Path | None = None) -> list:
+    index = quality_log_dir(root) / "index.jsonl"
+    if not index.is_file():
+        return []
+    lines = index.read_text(encoding="utf-8").splitlines()
+    out = []
+    for line in lines[-max(1, int(limit)):]:
+        try:
+            out.append(json.loads(line))
+        except json.JSONDecodeError:
+            continue
+    out.reverse()
+    return out
 
 
 def decode_image_field(value: str) -> bytes:
@@ -194,7 +275,7 @@ WORKER_UI_HTML = """<!DOCTYPE html>
 def build_app(pipe):
     from fastapi import FastAPI, HTTPException, Request
     from fastapi.middleware.cors import CORSMiddleware
-    from fastapi.responses import HTMLResponse, JSONResponse, Response
+    from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, Response
 
     app = FastAPI(title="Makeo catalog worker")
     app.add_middleware(
@@ -249,6 +330,9 @@ def build_app(pipe):
             raise HTTPException(400, f"could not read images: {e}") from e
         if not lock.acquire(blocking=False):
             raise HTTPException(429, "worker is busy — try again in a minute")
+        started = time.time()
+        error = None
+        png = None
         try:
             result = pipe(
                 person_image=person_im,
@@ -262,16 +346,48 @@ def build_app(pipe):
                 segmentation_free=True,
             )
             image = result.images[0]
-        except HTTPException:
+            buf = io.BytesIO()
+            image.save(buf, format="PNG")
+            png = buf.getvalue()
+        except HTTPException as e:
+            error = str(e.detail)
             raise
         except Exception as e:
+            error = str(e)
             raise HTTPException(500, f"try-on failed: {e}") from e
         finally:
             if lock.locked():
                 lock.release()
-        buf = io.BytesIO()
-        image.save(buf, format="PNG")
-        return Response(content=buf.getvalue(), media_type="image/png")
+            try:
+                write_quality_log(
+                    person=payload["person"],
+                    garment=payload["garment"],
+                    result_png=png,
+                    category=payload["category"],
+                    garment_photo_type=payload["garment_photo_type"],
+                    steps=payload["steps"],
+                    guidance=payload["guidance"],
+                    seed=payload["seed"],
+                    elapsed_ms=int((time.time() - started) * 1000),
+                    error=error,
+                )
+            except Exception as log_err:
+                print("quality log failed:", log_err, flush=True)
+        return Response(content=png, media_type="image/png")
+
+    @app.get("/logs")
+    def logs(limit: int = 50):
+        items = list_quality_logs(limit=limit)
+        return {"ok": True, "dir": str(quality_log_dir()), "count": len(items), "items": items}
+
+    @app.get("/logs/{run_id}/{name}")
+    def log_file(run_id: str, name: str):
+        if name not in LOG_SAFE_FILES or "/" in run_id or ".." in run_id:
+            raise HTTPException(404, "not found")
+        path = quality_log_dir() / run_id / name
+        if not path.is_file():
+            raise HTTPException(404, "not found")
+        return FileResponse(path)
 
     @app.get("/ready")
     def ready():
@@ -425,7 +541,7 @@ def serve(pipe, port: int = PORT) -> str:
         )
     public = urls[0]
     print("\n" + "=" * 60)
-    print("Makeo catalog worker is up. (json-v5)")
+    print("Makeo catalog worker is up. (json-v6)")
     print("PASTE THIS on Makeo → Catalog → Colab worker URL")
     print("(NOT colab.research.google.com, NOT a trycloudflare URL that never loads)")
     print()
@@ -433,9 +549,8 @@ def serve(pipe, port: int = PORT) -> str:
     for alt in urls[1:]:
         print(" also:", alt)
     print()
-    print("Confirm /ui in a tab:")
-    print(" ", public + "/ui")
-    print("That page must say Waiting for Makeo — not {\"detail\":\"Not Found\"}.")
+    print("Quality logs (every look: person + garment + result + settings):")
+    print(" ", quality_log_dir())
     print("Leave this cell running. Keep this Colab tab open.")
     print("=" * 60 + "\n")
     try:
