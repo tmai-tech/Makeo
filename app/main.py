@@ -471,11 +471,13 @@ def ig_post(request: Request, brand_id: str, csrf: str = Form(""),
     username = (me or {}).get("username") or ""
     enc = db.encrypt(access_token.strip())
     c.execute(
-        "INSERT INTO ig_accounts (brand_id, ig_user_id, username, token_enc, last_whoami_at) "
-        "VALUES (?,?,?,?,?) "
+        "INSERT INTO ig_accounts (brand_id, ig_user_id, username, token_enc, "
+        "last_whoami_at, auth_method) "
+        "VALUES (?,?,?,?,?,?) "
         "ON CONFLICT(brand_id) DO UPDATE SET ig_user_id=excluded.ig_user_id, "
-        "username=excluded.username, token_enc=excluded.token_enc, last_whoami_at=excluded.last_whoami_at",
-        (brand_id, ig_user_id.strip(), username, enc, db.now()),
+        "username=excluded.username, token_enc=excluded.token_enc, "
+        "last_whoami_at=excluded.last_whoami_at, auth_method=excluded.auth_method",
+        (brand_id, ig_user_id.strip(), username, enc, db.now(), "paste"),
     )
     c.commit()
     c.close()

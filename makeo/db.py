@@ -43,7 +43,8 @@ CREATE TABLE IF NOT EXISTS ig_accounts (
   username TEXT,
   token_enc BLOB NOT NULL,
   token_expires_at TEXT,
-  last_whoami_at TEXT
+  last_whoami_at TEXT,
+  auth_method TEXT NOT NULL DEFAULT 'paste'
 );
 CREATE TABLE IF NOT EXISTS discord_targets (
   brand_id TEXT PRIMARY KEY REFERENCES brands(id),
@@ -125,7 +126,18 @@ def connect(path: Path | None = None) -> sqlite3.Connection:
     conn.execute("PRAGMA journal_mode=WAL")
     conn.execute("PRAGMA foreign_keys=ON")
     conn.executescript(SCHEMA)
+    _migrate(conn)
     return conn
+
+
+def _migrate(conn: sqlite3.Connection) -> None:
+    """Additive columns so paste tokens can become OAuth later without a dump."""
+    cols = {row[1] for row in conn.execute("PRAGMA table_info(ig_accounts)")}
+    if "auth_method" not in cols:
+        conn.execute(
+            "ALTER TABLE ig_accounts ADD COLUMN auth_method TEXT NOT NULL DEFAULT 'paste'"
+        )
+        conn.commit()
 
 
 def fernet():

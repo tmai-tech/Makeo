@@ -108,10 +108,30 @@ def _require(data: dict, *keys: str) -> None:
         raise BrandConfigError(f"missing required field(s): {', '.join(missing)}")
 
 
+def feed_host_allowed(url: str) -> bool:
+    host = (urlparse(url).hostname or "").lower()
+    return host in ALLOWED_FEED_HOSTS
+
+
+def build_feeds(locale: Locale | None = None, rss_query: str = "") -> list[str]:
+    """Allowlisted Google News + Trends URLs from locale.region. No arbitrary RSS."""
+    loc = locale or Locale()
+    region = (loc.region or "IN").upper()
+    lang = loc.language or "en-IN"
+    lang_short = lang.split("-", 1)[0] or "en"
+    q = rss_query or "when:1d+gen+z+OR+viral+OR+trending"
+    news = (
+        f"https://news.google.com/rss/search?q={q}"
+        f"&hl={lang}&gl={region}&ceid={region}:{lang_short}"
+    )
+    trends = f"https://trends.google.com/trending/rss?geo={region}"
+    return [news, trends]
+
+
 def _check_feeds(feeds: list[str]) -> None:
     for url in feeds:
-        host = (urlparse(url).hostname or "").lower()
-        if host not in ALLOWED_FEED_HOSTS:
+        if not feed_host_allowed(url):
+            host = (urlparse(url).hostname or "").lower()
             raise BrandConfigError(
                 f"feed host not allowlisted: {host or url!r} "
                 f"(allowed: {', '.join(sorted(ALLOWED_FEED_HOSTS))})"
