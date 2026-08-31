@@ -10,9 +10,10 @@ Leave this cell running. Do not close the Colab tab.
 """
 from __future__ import annotations
 
+import base64
 import io
-import os
 import re
+import socket
 import stat
 import subprocess
 import sys
@@ -23,6 +24,39 @@ from pathlib import Path
 
 PORT = 8766
 CF_BIN = Path("/tmp/cloudflared")
+MAX_IMAGE_BYTES = 10 * 1024 * 1024
+
+
+def decode_image_field(value: str) -> bytes:
+    """Accept a data URL or raw base64 string from the Makeo catalog page."""
+    s = (value or "").strip()
+    if not s:
+        raise ValueError("empty image")
+    if s.lower().startswith("data:") and "," in s:
+        s = s.split(",", 1)[1]
+    s = re.sub(r"\s+", "", s)
+    try:
+        data = base64.b64decode(s, validate=False)
+    except Exception as e:
+        raise ValueError(f"not base64: {e}") from e
+    if not data:
+        raise ValueError("empty image")
+    if len(data) > MAX_IMAGE_BYTES:
+        raise ValueError("image too large (keep under 10 MB)")
+    return data
+
+
+def _free_port(start: int = PORT) -> int:
+    for port in range(start, start + 20):
+        sock = socket.socket()
+        try:
+            sock.bind(("127.0.0.1", port))
+            return port
+        except OSError:
+            continue
+        finally:
+            sock.close()
+    raise RuntimeError("no free local port for the catalog worker")
 
 
 def _ensure_web():
@@ -52,9 +86,19 @@ def _open_image(data: bytes):
 
 
 def build_app(pipe):
-    from fastapi import FastAPI, File, Form, HTTPException, UploadFile
+    from fastapi import FastAPI, HTTPException
     from fastapi.middleware.cors import CORSMiddleware
     from fastapi.responses import JSONResponse, Response
+    from pydantic import BaseModel
+
+    class TryOnBody(BaseModel):
+        person: str
+        garment: str
+        category: str = "one-pieces"
+        garment_photo_type: str = "flat-lay"
+        steps: int = 20
+        guidance: float = 1.5
+        seed: int = 42
 
     app = FastAPI(title="Makeo catalog worker")
     app.add_middleware(
@@ -65,6 +109,15 @@ def build_app(pipe):
     )
     lock = threading.Lock()
 
+    @app.middleware("http")
+    async def cors_on_errors(request, call_next):
+        try:
+            resp = await call_next(request)
+        except Exception as exc:
+            resp = JSONResponse({"detail": str(exc)}, status_code=500)
+        resp.headers.setdefault("access-control-allow-origin", "*")
+        return resp
+
     @app.get("/")
     def root():
         return {"ok": True, "service": "makeo-catalog-vton", "ready": pipe is not None}
@@ -74,51 +127,46 @@ def build_app(pipe):
         return {"ok": True, "ready": pipe is not None}
 
     @app.post("/tryon")
-    async def tryon(
-        person: UploadFile = File(...),
-        garment: UploadFile = File(...),
-        category: str = Form("one-pieces"),
-        garment_photo_type: str = Form("flat-lay"),
-        steps: int = Form(20),
-        guidance: float = Form(1.5),
-        seed: int = Form(42),
-    ):
-        if category not in ("tops", "bottoms", "one-pieces"):
+    async def tryon(body: TryOnBody):
+        if body.category not in ("tops", "bottoms", "one-pieces"):
             raise HTTPException(400, "category must be tops, bottoms, or one-pieces")
-        if garment_photo_type not in ("flat-lay", "model"):
+        if body.garment_photo_type not in ("flat-lay", "model"):
             raise HTTPException(400, "garment_photo_type must be flat-lay or model")
-        steps = max(10, min(int(steps), 50))
-        person_b = await person.read()
-        garment_b = await garment.read()
-        if not person_b or not garment_b:
-            raise HTTPException(400, "person and garment images are required")
-        if len(person_b) + len(garment_b) > 20 * 1024 * 1024:
-            raise HTTPException(400, "images too large (keep under 10 MB each)")
+        try:
+            person_b = decode_image_field(body.person)
+            garment_b = decode_image_field(body.garment)
+        except ValueError as e:
+            raise HTTPException(400, f"could not read images: {e}") from e
         try:
             person_im = _open_image(person_b)
             garment_im = _open_image(garment_b)
         except Exception as e:
             raise HTTPException(400, f"could not read images: {e}") from e
+        steps = max(10, min(int(body.steps), 50))
         if not lock.acquire(blocking=False):
             raise HTTPException(429, "worker is busy — try again in a minute")
         try:
             result = pipe(
                 person_image=person_im,
                 garment_image=garment_im,
-                category=category,
-                garment_photo_type=garment_photo_type,
+                category=body.category,
+                garment_photo_type=body.garment_photo_type,
                 num_samples=1,
                 num_timesteps=steps,
-                guidance_scale=float(guidance),
-                seed=int(seed),
+                guidance_scale=float(body.guidance),
+                seed=int(body.seed),
                 segmentation_free=True,
             )
+            image = result.images[0]
+        except HTTPException:
+            raise
         except Exception as e:
             raise HTTPException(500, f"try-on failed: {e}") from e
         finally:
-            lock.release()
+            if lock.locked():
+                lock.release()
         buf = io.BytesIO()
-        result.images[0].save(buf, format="PNG")
+        image.save(buf, format="PNG")
         return Response(content=buf.getvalue(), media_type="image/png")
 
     @app.get("/ready")
@@ -164,6 +212,7 @@ def serve(pipe, port: int = PORT) -> str:
     import uvicorn
 
     app = build_app(pipe)
+    port = _free_port(port)
     thread = threading.Thread(
         target=lambda: uvicorn.run(app, host="127.0.0.1", port=port, log_level="warning"),
         daemon=True,
@@ -179,6 +228,7 @@ def serve(pipe, port: int = PORT) -> str:
     print(" ", public)
     print()
     print("Leave this cell running. Keep this Colab tab open.")
+    print("If Makeo still cannot reach the worker, you are on an old cell — stop this cell and run it again.")
     print("=" * 60 + "\n")
     try:
         while True:

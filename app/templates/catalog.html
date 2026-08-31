@@ -48,13 +48,36 @@
     if (!person || !garment) { status.textContent = "Add both photos."; return; }
     go.disabled = true;
     status.textContent = "Sending to Colab… 1–3 minutes.";
-    var body = new FormData();
-    body.append("person", person);
-    body.append("garment", garment);
-    body.append("category", document.getElementById("catCategory").value);
-    body.append("garment_photo_type", document.getElementById("catPhotoType").value);
-    body.append("steps", "20");
-    fetch(base.replace(/\/+$/, "") + "/tryon", { method: "POST", body: body })
+    function toData(file) {
+      return new Promise(function (resolve, reject) {
+        var img = new Image();
+        var url = URL.createObjectURL(file);
+        img.onload = function () {
+          var s = Math.min(1, 1280 / Math.max(img.naturalWidth, img.naturalHeight));
+          var c = document.createElement("canvas");
+          c.width = Math.max(1, Math.round(img.naturalWidth * s));
+          c.height = Math.max(1, Math.round(img.naturalHeight * s));
+          c.getContext("2d").drawImage(img, 0, 0, c.width, c.height);
+          URL.revokeObjectURL(url);
+          resolve(c.toDataURL("image/jpeg", 0.9));
+        };
+        img.onerror = function () { URL.revokeObjectURL(url); reject(new Error("bad image")); };
+        img.src = url;
+      });
+    }
+    Promise.all([toData(person), toData(garment)]).then(function (pair) {
+      return fetch(base.replace(/\/+$/, "") + "/tryon", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          person: pair[0],
+          garment: pair[1],
+          category: document.getElementById("catCategory").value,
+          garment_photo_type: document.getElementById("catPhotoType").value,
+          steps: 20
+        })
+      });
+    })
       .then(function (r) {
         if (!r.ok) return r.text().then(function (t) { throw new Error(t.slice(0, 240)); });
         return r.blob();

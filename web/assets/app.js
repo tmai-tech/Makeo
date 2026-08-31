@@ -1033,23 +1033,41 @@
     });
   }
 
+  function cleanWorkerUrl(raw) {
+    var u = String(raw || "").replace(/[\u200b\u200c\u200d\ufeff]/g, "").trim();
+    var cf = u.match(/https:\/\/[a-z0-9-]+\.trycloudflare\.com/i);
+    if (cf) return cf[0];
+    u = u.replace(/^[`'<\[]+|[>`'\]]+$/g, "");
+    u = u.replace(/\s+/g, "");
+    u = u.replace(/\/health\/?$/i, "");
+    u = u.replace(/\/+$/, "");
+    return u;
+  }
+
   function workerUrlOf(b) {
-    return String((b && b.catalogWorkerUrl) || "").trim().replace(/\/+$/, "");
+    return cleanWorkerUrl(b && b.catalogWorkerUrl);
   }
 
   function workerUrlError(raw) {
-    var u = String(raw || "").trim();
+    var u = cleanWorkerUrl(raw);
     if (!u) {
       return "Paste the URL Colab printed after Start worker — it looks like https://random-words.trycloudflare.com";
     }
     var low = u.toLowerCase();
-    if (low.indexOf("colab.research.google.com") >= 0 || low.indexOf("colab.google") >= 0) {
-      return "That is the Colab notebook tab, not the worker. In Colab scroll to the last cell (Start worker), run it, and copy the https://….trycloudflare.com line.";
+    if (low.indexOf("colab.research.google.com") >= 0 || low.indexOf("colab.google.com") >= 0) {
+      return "That is the Colab notebook tab, not the worker. Copy the https://….trycloudflare.com line from the last Colab cell.";
     }
     if (low.indexOf("github.com") >= 0 || low.indexOf("githubusercontent.com") >= 0) {
       return "That is a GitHub link. You need the trycloudflare.com URL printed by the Colab worker cell.";
     }
-    if (low.indexOf("trycloudflare.com") < 0 && low.indexOf("ngrok") < 0 && low.indexOf("loca.lt") < 0) {
+    var okHost = (
+      low.indexOf("trycloudflare.com") >= 0 ||
+      low.indexOf("ngrok") >= 0 ||
+      low.indexOf("loca.lt") >= 0 ||
+      low.indexOf("googleusercontent.com") >= 0 ||
+      low.indexOf("gradio.live") >= 0
+    );
+    if (!okHost) {
       return "This does not look like a tunnel URL. It must be https://….trycloudflare.com from the Colab worker cell output.";
     }
     if (low.indexOf("http://") === 0) {
@@ -1077,9 +1095,10 @@
       '<div class="row worker-row">' +
       '<input id="workerUrl" placeholder="https://….trycloudflare.com" value="' + esc(b.catalogWorkerUrl || "") + '"/>' +
       '<button type="button" class="btn ghost" id="saveWorker">Save</button>' +
+      '<a class="btn ghost" id="openWorker" target="_blank" rel="noopener" href="#">Open worker once</a>' +
       '<button type="button" class="btn ghost" id="startColab">Start Colab</button>' +
       "</div>" +
-      '<p class="muted">Not the <code>colab.research.google.com</code> link. Run the last Colab cell (<strong>Start worker</strong>) and paste the <code>https://….trycloudflare.com</code> line it prints. Keep that Colab tab open.</p>' +
+      '<p class="muted">Paste the <code>https://….trycloudflare.com</code> line Colab printed. Click <strong>Save</strong>, then in the new tab click through any Cloudflare warning until you see <code>{"ok":true}</code>. Come back here and Create look. Keep Colab open.</p>' +
       '<div class="cat-grid">' +
       '<div><label>Model</label><div class="drop" id="dropPerson"><span class="hint">Indian model · full body or 3/4</span>' +
       '<input type="file" id="filePerson" accept="image/*"/></div></div>' +
@@ -1144,12 +1163,42 @@
       pill.textContent = "No worker URL";
       return;
     }
-    fetch(url + "/health").then(function (r) { return r.json(); }).then(function (d) {
+    fetch(url + "/health", { mode: "cors", cache: "no-store", credentials: "omit" }).then(function (r) { return r.json(); }).then(function (d) {
       pill.className = "worker " + (d && d.ok ? "ok" : "bad");
       pill.textContent = d && d.ok ? "Colab worker live" : "Worker not ready";
     }).catch(function () {
       pill.className = "worker bad";
-      pill.textContent = "Worker offline";
+      pill.textContent = "Open worker URL once";
+    });
+  }
+
+  function workerBlockedHtml(url) {
+    return '<span class="error">Colab is running, but this browser has not been allowed through Cloudflare yet. ' +
+      'Open <a href="' + esc(url) + '" target="_blank" rel="noopener">' + esc(url) + "</a> " +
+      "in a new tab, click through the warning until you see JSON like <code>{\"ok\":true}</code>, " +
+      "then come back and try Create look again. Do not restart Colab.</span>";
+  }
+
+  function fileToDataUrl(file, maxEdge) {
+    return new Promise(function (resolve, reject) {
+      var img = new Image();
+      var url = URL.createObjectURL(file);
+      img.onload = function () {
+        var w = img.naturalWidth || 1;
+        var h = img.naturalHeight || 1;
+        var scale = Math.min(1, (maxEdge || 1280) / Math.max(w, h));
+        var canvas = document.createElement("canvas");
+        canvas.width = Math.max(1, Math.round(w * scale));
+        canvas.height = Math.max(1, Math.round(h * scale));
+        canvas.getContext("2d").drawImage(img, 0, 0, canvas.width, canvas.height);
+        URL.revokeObjectURL(url);
+        resolve(canvas.toDataURL("image/jpeg", 0.9));
+      };
+      img.onerror = function () {
+        URL.revokeObjectURL(url);
+        reject(new Error("Could not read " + ((file && file.name) || "image")));
+      };
+      img.src = url;
     });
   }
 
@@ -1167,9 +1216,17 @@
     window.__catPing = setInterval(function () { pingWorker(workerUrlOf(b), pill); }, 8000);
 
     var saveBtn = document.getElementById("saveWorker");
+    var openBtn = document.getElementById("openWorker");
+    function syncOpen() {
+      var u = cleanWorkerUrl(urlInput && urlInput.value);
+      if (openBtn) openBtn.href = u || "#";
+    }
+    if (urlInput) urlInput.addEventListener("input", syncOpen);
+    syncOpen();
     if (saveBtn) {
       saveBtn.addEventListener("click", function () {
-        var typed = (urlInput.value || "").trim().replace(/\/+$/, "");
+        var typed = cleanWorkerUrl(urlInput.value);
+        if (urlInput) urlInput.value = typed;
         var why = workerUrlError(typed);
         if (why) {
           if (status) status.innerHTML = '<span class="error">' + esc(why) + "</span>";
@@ -1180,8 +1237,12 @@
         rec.catalogWorkerUrl = typed;
         save(s);
         b = rec;
+        syncOpen();
         pingWorker(workerUrlOf(b), pill);
-        if (status) status.innerHTML = '<span class="ok">Saved. Checking /health on the worker…</span>';
+        try { window.open(typed, "makeo-worker"); } catch (e) {}
+        if (status) {
+          status.innerHTML = '<span class="ok">Saved. Finish the new tab: click through Cloudflare until you see <code>{"ok":true}</code>, then Create look here.</span>';
+        }
       });
     }
 
@@ -1204,13 +1265,22 @@
       }
       go.disabled = true;
       status.textContent = "Sending to Colab… this can take 1–3 minutes. You can stay on this page.";
-      var body = new FormData();
-      body.append("person", person);
-      body.append("garment", garment);
-      body.append("category", chipValue("catCategory") || "one-pieces");
-      body.append("garment_photo_type", chipValue("catPhotoType") || "flat-lay");
-      body.append("steps", "20");
-      fetch(base + "/tryon", { method: "POST", body: body })
+      Promise.all([fileToDataUrl(person, 1280), fileToDataUrl(garment, 1280)])
+        .then(function (pair) {
+          return fetch(base + "/tryon", {
+            method: "POST",
+            mode: "cors",
+            credentials: "omit",
+            headers: { "Content-Type": "application/json", "Accept": "image/png,application/json" },
+            body: JSON.stringify({
+              person: pair[0],
+              garment: pair[1],
+              category: chipValue("catCategory") || "one-pieces",
+              garment_photo_type: chipValue("catPhotoType") || "flat-lay",
+              steps: 20
+            })
+          });
+        })
         .then(function (r) {
           if (!r.ok) {
             return r.text().then(function (t) {
@@ -1249,8 +1319,9 @@
         .catch(function (err) {
           go.disabled = false;
           var msg = (err && err.message) || "Could not reach Colab.";
-          if (msg.indexOf("Failed to fetch") >= 0) {
-            msg = "Could not reach the worker. Confirm the URL, that the Colab cell is still running, and that you allowed this site if the browser asked.";
+          if (msg.indexOf("Failed to fetch") >= 0 || msg.indexOf("NetworkError") >= 0 || msg.indexOf("Load failed") >= 0) {
+            status.innerHTML = workerBlockedHtml(base);
+            return;
           }
           status.innerHTML = '<span class="error">' + esc(msg) + "</span>";
         });
