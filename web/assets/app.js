@@ -30,6 +30,8 @@
     s.brands = s.brands || [];
     s.jobs = s.jobs || [];
     s.session = s.session || null;
+    s.me = s.me || null;
+    s.makeoApiUrl = s.makeoApiUrl || "";
     s.deletedBrandIds = s.deletedBrandIds || [];
     PREV_KEYS.forEach(function (k) {
       try {
@@ -64,9 +66,27 @@
     return h;
   }
   function go(path) { location.hash = "#" + path; }
+  function apiUrl(s) {
+    return String((s || state()).makeoApiUrl || "").replace(/\/+$/, "");
+  }
+  function cleanApiUrl(raw) {
+    var u = String(raw || "").trim().replace(/\/+$/, "");
+    if (!u) return "";
+    var low = u.toLowerCase();
+    if (low.indexOf("colab.research.google.com") >= 0) return "";
+    if (low.indexOf("github.com") >= 0 || low.indexOf("githubusercontent.com") >= 0) return "";
+    return u;
+  }
   function user(s) {
+    if (apiUrl(s)) {
+      return (s.me && s.me.id) ? s.me : null;
+    }
     if (!s.session) return null;
     return s.users.filter(function (u) { return u.id === s.session; })[0] || null;
+  }
+  function whoLabel(u) {
+    if (!u) return "";
+    return (u.name || u.email || "").trim();
   }
   function mine(s, list) {
     var u = user(s);
@@ -429,11 +449,11 @@
     var nav = opts.landing
       ? '<a href="#/help">Easy tutorial</a><a href="#/signup">Create account</a><a href="#/login">Sign in</a>'
       : (u
-        ? '<a href="#/home">Home</a><a href="#/help">Tutorial</a><span class="who">' + esc(u.email) + "</span><a href=\"#/logout\">Log out</a>"
+        ? '<a href="#/home">Home</a><a href="#/help">Tutorial</a><span class="who">' + esc(whoLabel(u)) + "</span><a href=\"#/logout\">Log out</a>"
         : '<a href="#/help">Tutorial</a><a href="#/login">Sign in</a><a href="#/signup">Create account</a>');
     var preview = location.pathname.indexOf("/preview/fal") >= 0;
     return (
-      '<header class="top"><a class="brand" href="#/"><img src="assets/icon.svg" width="28" height="28" alt=""/><span>Makeo</span></a><nav>' +
+      '<header class="top"><a class="brand" href="#/"><img src="assets/icon.svg" width="32" height="32" alt=""/><span>Makeo</span></a><nav>' +
       nav + "</nav></header>" +
       (preview
         ? '<div class="banner">PREVIEW of the fal.ai branch. This is not the live site. Live stays at <a href="https://tmai-tech.github.io/Makeo/">tmai-tech.github.io/Makeo</a>.</div>'
@@ -450,15 +470,23 @@
   function landing() {
     return (
       '<section class="hero">' +
-      '<p class="eyebrow">Create account · Add brand · Generate a preview · Approve</p>' +
-      "<h1>Your brand. Your prompt.<br/>An 8-second Reel.</h1>" +
-      '<p class="lead">Follow the easy tutorial. We show every click — including which Google page gives you a key.</p>' +
-      '<div class="actions"><a class="btn primary" href="#/help">Start the easy tutorial</a>' +
-      '<a class="btn ghost" href="#/signup">I already know — create account</a></div></section>' +
-      '<ol class="pipe" id="how"><li><strong>1. Account</strong><span>Email + password, this browser only</span></li>' +
+      '<p class="eyebrow">Atelier for Indian brands</p>' +
+      "<h1>Lookbooks and Reels<br/>from one studio.</h1>" +
+      '<p class="lead">Dress a model in a saree or lehenga. Cut an 8-second Reel. Nothing posts until you approve.</p>' +
+      '<div class="actions"><a class="btn primary" href="#/signup">Create account</a>' +
+      '<a class="btn ghost" href="#/help">See every click</a></div></section>' +
+      '<div class="pillar-grid">' +
+      '<article class="pillar"><p class="eyebrow">Catalog</p><h2>Virtual try-on</h2>' +
+      "<p>Model plus garment on a Colab T4. Pallu, zari, and print stay on the cloth — not a white packshot.</p></article>" +
+      '<article class="pillar"><p class="eyebrow">Reels</p><h2>Eight seconds</h2>' +
+      "<p>Your prompt, your fal or Flow key. Approve in the inbox before Instagram ever sees it.</p></article>" +
+      '<article class="pillar"><p class="eyebrow">Account</p><h2>Any device</h2>' +
+      "<p>Name, email, and password on the Makeo server. Sign in from the next phone.</p></article>" +
+      "</div>" +
+      '<ol class="pipe" id="how"><li><strong>1. Account</strong><span>Name, email, password on the Makeo server</span></li>' +
       "<li><strong>2. Brand</strong><span>Name, pitch, hook, optional logo</span></li>" +
-      "<li><strong>3. Generate</strong><span>Needs your prompt, or a pitch/hook for a topic</span></li>" +
-      "<li><strong>4. Approve</strong><span>Only after a preview video is ready</span></li></ol>"
+      "<li><strong>3. Generate or catalog</strong><span>A Reel prompt, or a model and a garment</span></li>" +
+      "<li><strong>4. Approve</strong><span>Only after a preview is ready</span></li></ol>"
     );
   }
 
@@ -470,8 +498,8 @@
       '<div class="how">' +
 
       '<div class="how-step"><h3><span class="n">1</span> Create your Makeo login</h3>' +
-      "<p>This login is only for Makeo in <em>this</em> browser. Invent a password. Do not use your bank password.</p>" +
-      '<p class="click">Click <strong>Create my account now</strong> below. Type your email. Type a password (6 or more letters). Click <strong>Create account</strong>.</p>' +
+      "<p>Accounts live on the Makeo server, so you can sign in from another phone or computer. Invent a password. Do not use your bank password.</p>" +
+      '<p class="click">Paste your Makeo server URL if asked. Click <strong>Create my account now</strong>. Type your name, email, password, and the same password again (8 or more letters). Click <strong>Create account</strong>.</p>' +
       '<a class="btn primary" href="#/signup">Create my account now</a></div>' +
 
       '<div class="how-step"><h3><span class="n">2</span> Add your brand name</h3>' +
@@ -529,51 +557,81 @@
     );
   }
 
-  function authForm(kind, err) {
+  function authForm(kind, err, notice) {
+    var s = state();
     var title = kind === "signup" ? "Create your Makeo account" : "Sign in";
     var btn = kind === "signup" ? "Create account" : "Sign in";
     var other = kind === "signup"
       ? 'Already have one? <a href="#/login">Sign in</a>'
       : 'New here? <a href="#/signup">Create an account</a>';
+    var api = apiUrl(s);
+    var nameBlock = kind === "signup"
+      ? '<label>Full name</label><input name="name" required minlength="2" maxlength="80" autocomplete="name"/>'
+      : "";
+    var confirmBlock = kind === "signup"
+      ? '<label>Confirm password</label><div class="pw-wrap">' +
+        '<input id="passwordConfirm" name="password_confirm" type="password" required minlength="8" autocomplete="new-password"/>' +
+        '<button type="button" class="pw-toggle" data-for="passwordConfirm">Show</button></div>'
+      : "";
     return (
+      '<section class="auth-layout">' +
+      '<aside class="auth-aside"><p class="eyebrow">Makeo</p>' +
+      "<h1>" + (kind === "signup" ? "Open your studio." : "Welcome back.") + "</h1>" +
+      "<p>Accounts live on the Makeo server. Paste that URL once, then use the same login on any device.</p></aside>" +
       '<section class="panel"><h1>' + title + "</h1>" +
-      '<p class="muted">Use <strong>Create account</strong> first on this same browser. Login only works for accounts created here — not email/password from Instagram or another device.</p>' +
+      (notice ? '<p class="ok">' + esc(notice) + "</p>" : "") +
       (err ? '<p class="error">' + esc(err) + "</p>" : "") +
+      '<form id="apiUrlForm" class="api-url">' +
+      '<label>Makeo server URL</label>' +
+      '<input id="makeoApiUrl" name="makeoApiUrl" placeholder="http://127.0.0.1:8780" value="' + esc(api) + '"/>' +
+      '<div class="row"><button class="btn ghost" type="submit" id="saveApiUrl">Save server</button>' +
+      '<span class="status" id="apiPing"></span></div></form>' +
       '<form id="authForm">' +
+      nameBlock +
       '<label>Email</label><input name="email" type="email" required autocomplete="username"/>' +
-      '<label>Password</label><input name="password" type="password" required minlength="6" autocomplete="' +
-      (kind === "signup" ? "new-password" : "current-password") + '"/>' +
+      '<label>Password</label><div class="pw-wrap">' +
+      '<input id="password" name="password" type="password" required' +
+      (kind === "signup" ? ' minlength="8" autocomplete="new-password"' : ' autocomplete="current-password"') +
+      '/>' +
+      '<button type="button" class="pw-toggle" data-for="password">Show</button></div>' +
+      confirmBlock +
       '<div class="row"><button class="btn primary" type="submit">' + btn + "</button></div>" +
-      '<p class="muted">' + other + "</p></form></section>"
+      '<p class="muted">' + other + "</p></form></section></section>"
     );
   }
 
   function home(s) {
     var brands = mine(s, s.brands);
     var cards = brands.length
-      ? brands.map(function (b) {
-          return '<div class="card"><a href="#/brands/' + b.id + '"><strong>' + esc(b.name) +
-            "</strong></a><div class=\"muted\">" + esc(b.slug) + "</div>" +
-            '<div class="row"><a href="#/brands/' + b.id + '/keys">Keys</a>' +
-            ' · <a href="#/brands/' + b.id + '/compose">Generate</a>' +
-            ' · <a href="#/brands/' + b.id + '/catalog">Catalog</a>' +
-            ' · <a href="#/brands/' + b.id + '/inbox">Inbox</a>' +
-            ' · <a href="#/brands/' + b.id + '/instagram">Instagram</a></div>' +
+      ? '<div class="brand-grid">' + brands.map(function (b) {
+          var mark = b.logo
+            ? '<img class="logo-preview" src="' + b.logo + '" alt=""/>'
+            : '<span class="logo-mark">' + esc((b.name || "?").charAt(0)) + "</span>";
+          return '<article class="card brand-card"><a class="brand-card-main" href="#/brands/' + b.id + '">' +
+            mark + "<div><strong>" + esc(b.name) + '</strong><span class="muted">' + esc(b.slug) +
+            "</span></div></a><nav class=\"card-links\">" +
+            '<a href="#/brands/' + b.id + '/catalog">Catalog</a>' +
+            '<a href="#/brands/' + b.id + '/compose">Generate</a>' +
+            '<a href="#/brands/' + b.id + '/inbox">Inbox</a>' +
+            '<a href="#/brands/' + b.id + '/keys">Keys</a>' +
+            '<a href="#/brands/' + b.id + '/instagram">Instagram</a></nav>' +
             '<div class="row"><button type="button" class="btn no deleteBrand" data-id="' + b.id +
-            '" data-name="' + esc(b.name) + '">Delete brand</button></div></div>';
-        }).join("")
-      : '<p class="muted">No brands yet. Create one to start.</p>';
+            '" data-name="' + esc(b.name) + '">Delete brand</button></div></article>';
+        }).join("") + "</div>"
+      : '<div class="empty"><p class="muted">No brands yet. Open a house to start the lookbook.</p></div>';
     return (
-      '<div class="banner">Stuck? Open the <a href="#/help">easy tutorial</a>. Add a <strong>fal.ai key</strong> (this branch) or a Google Flow key before a video can be made.</div>' +
-      "<h1>Your brands</h1>" + cards +
-      '<div class="actions"><a class="btn primary" href="#/brands/new">New brand</a> <a class="btn ghost" href="#/help">Show me every click</a></div>'
+      '<div class="page-head"><div><p class="eyebrow">Studio</p><h1>Your brands</h1></div>' +
+      '<div class="actions tight"><a class="btn primary" href="#/brands/new">New brand</a>' +
+      '<a class="btn ghost" href="#/help">Tutorial</a></div></div>' +
+      '<div class="banner">Add a <strong>fal.ai</strong> or Google Flow key before a Reel can be made. Catalog try-on uses the Colab worker.</div>' +
+      cards
     );
   }
 
   function brandForm(b, err) {
     b = b || {};
     return (
-      '<section class="panel"><h1>' + (b.id ? "Edit " + esc(b.name) : "New brand") + "</h1>" +
+      '<section class="panel"><p class="eyebrow">House</p><h1>' + (b.id ? "Edit " + esc(b.name) : "New brand") + "</h1>" +
       '<p class="muted">Name is required. Next you will add a fal.ai key or a Google Flow key — Generate will not run without one.</p>' +
       (err ? '<p class="error">' + esc(err) + "</p>" : "") +
       '<form id="brandForm">' +
@@ -663,7 +721,7 @@
       return '<option value="' + k + '">' + esc(falModels()[k].label) + "</option>";
     }).join("");
     return (
-      '<section class="panel"><h1>Generate for ' + esc(b.name) + "</h1>" +
+      '<section class="panel"><p class="eyebrow">Reel</p><h1>Generate for ' + esc(b.name) + "</h1>" +
       '<p class="muted">This branch can call <strong>fal.ai</strong> or Google Veo. Without a key or a prompt, nothing is generated and the missing items are listed.</p>' +
       (hasFal
         ? '<p class="ok">fal.ai key on file (…' + esc(hasFal.slice(-4)) + ").</p>"
@@ -763,60 +821,110 @@
     );
   }
 
+  function bindPwToggles() {
+    Array.prototype.forEach.call(document.querySelectorAll(".pw-toggle"), function (btn) {
+      btn.addEventListener("click", function () {
+        var id = btn.getAttribute("data-for");
+        var el = id ? document.getElementById(id) : null;
+        if (!el) return;
+        var show = el.type === "password";
+        el.type = show ? "text" : "password";
+        btn.textContent = show ? "Hide" : "Show";
+      });
+    });
+  }
+
+  function showAuth(kind, err, notice) {
+    var s = state();
+    render(shell(s, authForm(kind, err, notice), { landing: true }));
+    bindAuth(kind);
+  }
+
+  function pingMakeoApi(base, cb) {
+    fetch(base + "/health", { credentials: "include" }).then(function (r) {
+      return r.json();
+    }).then(function (j) {
+      cb(!!(j && j.ok));
+    }).catch(function () { cb(false); });
+  }
+
+  function bindApiUrlForm(kind) {
+    var form = document.getElementById("apiUrlForm");
+    if (!form) return;
+    form.addEventListener("submit", function (e) {
+      e.preventDefault();
+      var cleaned = cleanApiUrl(form.makeoApiUrl.value);
+      var ping = document.getElementById("apiPing");
+      if (!cleaned) {
+        if (ping) ping.textContent = "Need http://127.0.0.1:8780 (the uvicorn host).";
+        return;
+      }
+      var s = state();
+      s.makeoApiUrl = cleaned;
+      save(s);
+      if (ping) ping.textContent = "Checking…";
+      pingMakeoApi(cleaned, function (ok) {
+        showAuth(kind, ok ? "" : "Saved, but /health did not answer. Is uvicorn running on that URL?",
+          ok ? "Server live. Create an account or sign in." : "");
+      });
+    });
+  }
+
   function bindAuth(kind) {
+    bindPwToggles();
+    bindApiUrlForm(kind);
     var form = document.getElementById("authForm");
     if (!form) return;
     form.addEventListener("submit", function (e) {
       e.preventDefault();
+      var s = state();
+      var base = apiUrl(s);
+      if (!base) {
+        showAuth(kind, "Paste your Makeo server URL first (the host running uvicorn on port 8780), then Save server.");
+        return;
+      }
       var email = form.email.value.trim().toLowerCase();
       var pass = form.password.value;
-      hash(pass).then(function (h) {
-        var s = state();
-        if (s._saveError && kind === "signup") {
-          render(shell(s, authForm("signup", "Could not save the account in this browser (private/incognito often blocks it). Try a normal window."), { landing: true }));
-          bindAuth("signup");
+      var payload;
+      if (kind === "signup") {
+        var name = (form.name && form.name.value || "").trim();
+        var confirm = form.password_confirm ? form.password_confirm.value : "";
+        if (name.length < 2) {
+          showAuth("signup", "Enter your name (2–80 characters).");
           return;
         }
-        if (kind === "signup") {
-          if (s.users.some(function (u) { return u.email === email; })) {
-            render(shell(s, authForm("signup", "That email already has an account on this browser. Use Sign in."), { landing: true }));
-            bindAuth("signup");
-            return;
-          }
-          var u = { id: uid(), email: email, pass: h };
-          s.users.push(u);
-          s.session = u.id;
-          save(s);
-          if (s._saveError) {
-            render(shell(s, authForm("signup", "Account could not be stored: " + s._saveError), { landing: true }));
-            bindAuth("signup");
-            return;
-          }
-          go("/home");
-        } else {
-          var byEmail = s.users.filter(function (x) { return x.email === email; })[0];
-          var found = s.users.filter(function (x) { return x.email === email && x.pass === h; })[0];
-          var msg;
-          if (!s.users.length) {
-            msg = "No account exists in this browser yet. Click Create account (login does not use a server).";
-          } else if (!byEmail) {
-            msg = "No account for " + email + " in this browser. Create account first, or use the same browser where you signed up.";
-          } else if (!found) {
-            msg = "Password does not match the account saved in this browser.";
-          }
-          if (msg) {
-            render(shell(s, authForm("login", msg), { landing: true }));
-            bindAuth("login");
-            return;
-          }
-          s.session = found.id;
-          save(s);
-          go("/home");
+        if (pass.length < 8) {
+          showAuth("signup", "Password must be at least 8 characters.");
+          return;
         }
+        if (pass !== confirm) {
+          showAuth("signup", "Password and confirmation do not match.");
+          return;
+        }
+        payload = { name: name, email: email, password: pass, password_confirm: confirm };
+      } else {
+        payload = { email: email, password: pass };
+      }
+      var path = kind === "signup" ? "/v1/auth/signup" : "/v1/auth/login";
+      fetch(base + path, {
+        method: "POST",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload)
+      }).then(function (r) {
+        return r.json().then(function (j) { return { r: r, j: j }; });
+      }).then(function (x) {
+        if (!x.j || !x.j.ok || !x.j.user) {
+          showAuth(kind, (x.j && x.j.error) || "Could not reach the Makeo server.");
+          return;
+        }
+        var st = state();
+        st.me = x.j.user;
+        st.session = x.j.user.id;
+        save(st);
+        go("/home");
       }).catch(function (err) {
-        var s = state();
-        render(shell(s, authForm(kind, err.message || "Login failed."), { landing: true }));
-        bindAuth(kind);
+        showAuth(kind, (err && err.message) || "Could not reach the Makeo server. Check the URL and that uvicorn is running.");
       });
     });
   }
@@ -1124,7 +1232,7 @@
       : '<p class="muted">No looks yet. Connect Colab, drop a model and a garment, then create. Each result is logged for quality review.</p>';
     return (
       '<div class="cat-head">' +
-      "<div><h1>Catalog · " + esc(b.name) + "</h1>" +
+      "<div><p class=\"eyebrow\">Lookbook</p><h1>" + esc(b.name) + "</h1>" +
       '<p class="muted">Put this brand’s real outfit on a model. Colab stays in the other tab and does the GPU work.</p></div>' +
       '<div><span class="worker bad" id="workerPill">Worker offline</span></div></div>' +
       (note ? '<p class="banner">' + note + "</p>" : "") +
@@ -1569,16 +1677,53 @@
   }
 
   var timer = null;
+  var meTried = false;
   function render(html) { document.getElementById("app").innerHTML = html; }
+
+  function restoreMe(s, done) {
+    var base = apiUrl(s);
+    if (!base) {
+      done(s);
+      return;
+    }
+    fetch(base + "/v1/auth/me", { credentials: "include" }).then(function (r) {
+      return r.json();
+    }).then(function (j) {
+      if (j && j.ok && j.user) {
+        s.me = j.user;
+        s.session = j.user.id;
+      } else {
+        s.me = null;
+        s.session = null;
+      }
+      save(s);
+      done(s);
+    }).catch(function () { done(s); });
+  }
 
   function paint() {
     var s = state();
+    if (!meTried && apiUrl(s)) {
+      meTried = true;
+      restoreMe(s, function () { paint(); });
+      return;
+    }
     advanceJobs(s);
     save(s);
     var path = route();
     var parts = path.split("/").filter(Boolean);
 
-    if (path === "/logout") { s.session = null; save(s); go("/"); return; }
+    if (path === "/logout") {
+      var base = apiUrl(s);
+      s.session = null;
+      s.me = null;
+      save(s);
+      if (base) {
+        fetch(base + "/v1/auth/logout", { method: "POST", credentials: "include" }).catch(function () {});
+      }
+      go("/");
+      return;
+    }
     if (path === "/" || path === "/how") {
       render(shell(s, landing(), { landing: true }));
       return;

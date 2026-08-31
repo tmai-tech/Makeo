@@ -1,7 +1,8 @@
 {% extends "base.html" %}
 {% block title %}Catalog · {{ brand.name }}{% endblock %}
 {% block body %}
-<h1>Catalog · {{ brand.name }}</h1>
+<p class="eyebrow">Lookbook</p>
+<h1>{{ brand.name }}</h1>
 <p class="mut">Upload a model and a garment. Colab does the GPU work in the background. Keep this page open.</p>
 <form method="post">
   <input type="hidden" name="csrf" value="{{ csrf }}">

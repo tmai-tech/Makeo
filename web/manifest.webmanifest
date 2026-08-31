@@ -3,9 +3,9 @@
   "short_name": "Makeo",
   "start_url": "./",
   "display": "standalone",
-  "background_color": "#111111",
-  "theme_color": "#111111",
-  "description": "Generate, brand, approve, and post short Reels for any brand.",
+  "background_color": "#0B0A08",
+  "theme_color": "#0B0A08",
+  "description": "Lookbooks and 8-second Reels for Indian brands. Approve before anything posts.",
   "icons": [
     {
       "src": "assets/icon.svg",

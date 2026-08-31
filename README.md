@@ -15,7 +15,7 @@ is in [`STATUS.md`](STATUS.md).
 
 **Easy tutorial (every click):** **https://tmai-tech.github.io/Makeo/#/help**
 
-Walk the live demo there: **Create account → New brand → Instagram → Generate → Inbox (approve or reject)**. Accounts stay in that browser. Real Veo + Instagram still need the clone-and-run worker.
+Walk the live demo there: **Create account → New brand → Instagram → Generate → Inbox (approve or reject)**. Create account is name + email + password on the Makeo server (`uvicorn` on port 8780). Paste that server URL on the login page. Real Veo + Instagram still need the clone-and-run worker.
 
 Same hosting path as the other tmai-tech static apps: `web/` deploys on every
 push to `main` via `.github/workflows/deploy-pages.yml`.
@@ -48,12 +48,18 @@ python -m makeo.enqueue --brand buzzit
 python worker.py
 ```
 
-Site (one API process, port 8780):
+Site (one API process, port 8780). People can create their own account on
+`/signup` or `#/signup`. Operator create still works:
 
 ```
-python -m makeo.create_user you@brand.com 'password'
-python -m uvicorn app.main:app --host 127.0.0.1 --port 8780 --workers 1
+python -m makeo.create_user you@brand.com 'password' 'Ada'
+python -m uvicorn app.main:app --host 0.0.0.0 --port 8780 --workers 1
 ```
+
+On the GitHub Pages app, paste `http://127.0.0.1:8780` (same machine) or
+your HTTPS origin as **Makeo server URL**. For the Pages site on another
+device, the API must be HTTPS and started with
+`MAKEO_COOKIE_SAMESITE=none` (Secure cookies are forced).
 
 Each enqueue copies brand.json + assets into `data/tenants/<slug>/jobs/<id>/`.
 The worker must use only that prefix.

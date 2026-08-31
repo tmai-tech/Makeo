@@ -1,0 +1,35 @@
+{% extends "base.html" %}
+{% block title %}Create account · Makeo{% endblock %}
+{% block body %}
+<section class="auth-layout">
+  <aside class="auth-aside">
+    <p class="eyebrow">Makeo</p>
+    <h1>Open your studio.</h1>
+    <p>This login is stored on the Makeo server. You can sign in from another phone or computer.</p>
+  </aside>
+  <div class="card">
+    <h1>Create account</h1>
+    {% if error %}<p class="error">{{ error }}</p>{% endif %}
+    <form method="post" action="/signup">
+      <input type="hidden" name="csrf" value="{{ csrf }}">
+      <label>Full name</label>
+      <input name="name" required minlength="2" maxlength="80" autocomplete="name">
+      <label>Email</label>
+      <input name="email" type="email" required autocomplete="username">
+      <label>Password</label>
+      <div class="pw-wrap">
+        <input id="password" name="password" type="password" required minlength="8" autocomplete="new-password">
+        <button type="button" class="pw-toggle" data-for="password">Show</button>
+      </div>
+      <label>Confirm password</label>
+      <div class="pw-wrap">
+        <input id="password_confirm" name="password_confirm" type="password" required minlength="8" autocomplete="new-password">
+        <button type="button" class="pw-toggle" data-for="password_confirm">Show</button>
+      </div>
+      <button>Create account</button>
+    </form>
+    <p class="mut">Already have one? <a href="/login">Sign in</a></p>
+  </div>
+</section>
+<script src="/static/auth.js"></script>
+{% endblock %}

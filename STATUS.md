@@ -69,6 +69,12 @@ Waitlisted login, brand wizard, compose (custom or trends), inbox
 approve/reject, IG token paste. Caption edit is `jobs.caption_override`
 only. Nothing posts without a click.
 
+**Auth (after catalog lab)**  
+Self-serve email/password on FastAPI: name + email + password + confirm,
+Argon2, session cookie, `POST /v1/auth/signup|login|logout`, `GET /v1/auth/me`.
+GitHub Pages login talks to a pasteable Makeo server URL. Forgot-password
+is not built (no mailer).
+
 **PR 11 — Discord (optional)**  
 Buttons call the same job row over HTTP. Bot does not write `jobs` and
 does not call `newest_video()`.

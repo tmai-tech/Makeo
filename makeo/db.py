@@ -18,6 +18,7 @@ CREATE TABLE IF NOT EXISTS users (
   id TEXT PRIMARY KEY,
   email TEXT UNIQUE NOT NULL,
   password_hash TEXT NOT NULL,
+  name TEXT NOT NULL DEFAULT '',
   created_at TEXT NOT NULL
 );
 CREATE TABLE IF NOT EXISTS brands (
@@ -125,7 +126,15 @@ def connect(path: Path | None = None) -> sqlite3.Connection:
     conn.execute("PRAGMA journal_mode=WAL")
     conn.execute("PRAGMA foreign_keys=ON")
     conn.executescript(SCHEMA)
+    _migrate(conn)
     return conn
+
+
+def _migrate(conn: sqlite3.Connection) -> None:
+    cols = {row[1] for row in conn.execute("PRAGMA table_info(users)")}
+    if "name" not in cols:
+        conn.execute("ALTER TABLE users ADD COLUMN name TEXT NOT NULL DEFAULT ''")
+        conn.commit()
 
 
 def fernet():
@@ -181,8 +190,8 @@ def ensure_operator(conn) -> str:
         return row["id"]
     uid = new_id()
     conn.execute(
-        "INSERT INTO users (id, email, password_hash, created_at) VALUES (?,?,?,?)",
-        (uid, "operator@makeo.local", "!", now()),
+        "INSERT INTO users (id, email, password_hash, name, created_at) VALUES (?,?,?,?,?)",
+        (uid, "operator@makeo.local", "!", "Operator", now()),
     )
     return uid
 

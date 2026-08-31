@@ -1,14 +1,19 @@
-"""Makeo web: waitlisted auth, brands, compose, approve. One process."""
+"""Makeo web: email/password auth, brands, compose, approve. One process."""
 
 from __future__ import annotations
 
 import json
 import os
+import re
 import secrets
+import sqlite3
+import time
+from collections import defaultdict
 from pathlib import Path
 
 from fastapi import FastAPI, File, Form, Request, UploadFile
-from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse, Response
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse, Response
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from starlette.middleware.sessions import SessionMiddleware
@@ -20,9 +25,49 @@ HERE = Path(__file__).resolve().parent
 ROOT = HERE.parent
 TEMPLATES = Jinja2Templates(directory=str(HERE / "templates"))
 ALLOWED_ASSET = {".png", ".jpg", ".jpeg", ".gif", ".webp", ".mp4"}
+MIN_PASSWORD = 8
+LOGIN_ERROR = "Email or password is wrong."
+_EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
+_AUTH_WINDOW = 600
+_AUTH_HITS: dict[str, list[float]] = defaultdict(list)
 
 app = FastAPI(title="Makeo")
-app.add_middleware(SessionMiddleware, secret_key=os.environ.get("MAKEO_SESSION", "dev-only"))
+
+_same_site = (os.environ.get("MAKEO_COOKIE_SAMESITE") or "lax").lower()
+if _same_site not in ("lax", "strict", "none"):
+    _same_site = "lax"
+_https_only = os.environ.get("MAKEO_COOKIE_SECURE", "").lower() in ("1", "true", "yes")
+if _same_site == "none":
+    _https_only = True
+app.add_middleware(
+    SessionMiddleware,
+    secret_key=os.environ.get("MAKEO_SESSION", "dev-only"),
+    same_site=_same_site,
+    https_only=_https_only,
+)
+
+
+def cors_origins() -> list[str]:
+    origins = [
+        "https://tmai-tech.github.io",
+        "http://127.0.0.1:8780",
+        "http://localhost:8780",
+        "http://127.0.0.1:4173",
+        "http://localhost:4173",
+    ]
+    extra = (os.environ.get("MAKEO_PUBLIC_ORIGIN") or "").strip().rstrip("/")
+    if extra and extra not in origins:
+        origins.append(extra)
+    return origins
+
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=cors_origins(),
+    allow_credentials=True,
+    allow_methods=["GET", "POST", "OPTIONS"],
+    allow_headers=["Content-Type"],
+)
 app.mount("/static", StaticFiles(directory=str(HERE / "static")), name="static")
 
 
@@ -75,6 +120,98 @@ def ctx(request, user=None, **extra):
     return extra
 
 
+def user_public(row) -> dict:
+    name = ""
+    try:
+        name = row["name"] or ""
+    except (IndexError, KeyError):
+        name = ""
+    return {"id": row["id"], "name": name, "email": row["email"]}
+
+
+def display_name(user) -> str:
+    if not user:
+        return ""
+    try:
+        name = (user["name"] or "").strip()
+    except (IndexError, KeyError):
+        name = ""
+    return name or user["email"]
+
+
+def normalize_email(email: str) -> str:
+    return (email or "").strip().lower()
+
+
+def validate_signup(name: str, email: str, password: str, password_confirm: str):
+    name = (name or "").strip()
+    email = normalize_email(email)
+    if len(name) < 2 or len(name) > 80:
+        return None, "Enter your name (2–80 characters)."
+    if not _EMAIL_RE.match(email):
+        return None, "Enter a valid email."
+    if len(password or "") < MIN_PASSWORD:
+        return None, "Password must be at least 8 characters."
+    if password != password_confirm:
+        return None, "Password and confirmation do not match."
+    return {"name": name, "email": email, "password": password}, None
+
+
+def client_ip(request: Request) -> str:
+    return request.client.host if request.client else "unknown"
+
+
+def auth_rate_max() -> int:
+    try:
+        return max(1, int(os.environ.get("MAKEO_AUTH_RATE_MAX") or "10"))
+    except ValueError:
+        return 10
+
+
+def rate_limited(request: Request) -> bool:
+    ip = client_ip(request)
+    now = time.time()
+    hits = [t for t in _AUTH_HITS[ip] if now - t < _AUTH_WINDOW]
+    if len(hits) >= auth_rate_max():
+        _AUTH_HITS[ip] = hits
+        return True
+    hits.append(now)
+    _AUTH_HITS[ip] = hits
+    return False
+
+
+def origin_ok(request: Request) -> bool:
+    origin = (request.headers.get("origin") or "").rstrip("/")
+    if not origin:
+        return True
+    return origin in {o.rstrip("/") for o in cors_origins()}
+
+
+async def read_json(request: Request) -> dict:
+    try:
+        data = await request.json()
+    except Exception:
+        return {}
+    return data if isinstance(data, dict) else {}
+
+
+@app.exception_handler(PermissionError)
+async def permission_error(request: Request, exc: PermissionError):
+    want_json = "application/json" in (request.headers.get("accept") or "")
+    if str(exc) == "csrf":
+        if want_json:
+            return JSONResponse({"ok": False, "error": "csrf"}, 403)
+        return HTMLResponse("csrf", 403)
+    if want_json:
+        return JSONResponse({"ok": False, "error": "forbidden"}, 403)
+    return HTMLResponse("forbidden", 403)
+
+
+@app.get("/health")
+def health():
+    return {"ok": True, "auth": True}
+
+
 @app.get("/", response_class=HTMLResponse)
 def home(request: Request):
     user = current_user(request)
@@ -94,6 +231,8 @@ def home(request: Request):
 
 @app.get("/login", response_class=HTMLResponse)
 def login_get(request: Request):
+    if current_user(request):
+        return RedirectResponse("/", 302)
     return TEMPLATES.TemplateResponse(
         request, "login.html", ctx(request, error=None))
 
@@ -102,14 +241,53 @@ def login_get(request: Request):
 def login_post(request: Request, email: str = Form(), password: str = Form(),
                csrf: str = Form("")):
     check_csrf(request, csrf)
+    if rate_limited(request):
+        return TEMPLATES.TemplateResponse(
+            request, "login.html",
+            ctx(request, error="Too many tries. Wait a few minutes."),
+            status_code=429)
     c = conn()
-    row = c.execute("SELECT * FROM users WHERE email=?", (email.strip().lower(),)).fetchone()
+    row = c.execute("SELECT * FROM users WHERE email=?",
+                    (normalize_email(email),)).fetchone()
     c.close()
     if not row or not _verify(row["password_hash"], password):
         return TEMPLATES.TemplateResponse(
             request, "login.html",
-            ctx(request, error="Unknown account or waitlisted."), status_code=401)
+            ctx(request, error=LOGIN_ERROR), status_code=401)
     request.session["uid"] = row["id"]
+    return RedirectResponse("/", 302)
+
+
+@app.get("/signup", response_class=HTMLResponse)
+def signup_get(request: Request):
+    if current_user(request):
+        return RedirectResponse("/", 302)
+    return TEMPLATES.TemplateResponse(
+        request, "signup.html", ctx(request, error=None))
+
+
+@app.post("/signup")
+def signup_post(request: Request, name: str = Form(""), email: str = Form(""),
+                password: str = Form(""), password_confirm: str = Form(""),
+                csrf: str = Form("")):
+    check_csrf(request, csrf)
+    if rate_limited(request):
+        return TEMPLATES.TemplateResponse(
+            request, "signup.html",
+            ctx(request, error="Too many tries. Wait a few minutes."),
+            status_code=429)
+    data, err = validate_signup(name, email, password, password_confirm)
+    if err:
+        return TEMPLATES.TemplateResponse(
+            request, "signup.html", ctx(request, error=err), status_code=400)
+    try:
+        uid = create_user(data["email"], data["password"], data["name"])
+    except sqlite3.IntegrityError:
+        return TEMPLATES.TemplateResponse(
+            request, "signup.html",
+            ctx(request, error="That email already has an account. Sign in."),
+            status_code=409)
+    request.session["uid"] = uid
     return RedirectResponse("/", 302)
 
 
@@ -117,6 +295,64 @@ def login_post(request: Request, email: str = Form(), password: str = Form(),
 def logout(request: Request):
     request.session.clear()
     return RedirectResponse("/login", 302)
+
+
+@app.post("/v1/auth/signup")
+async def api_signup(request: Request):
+    if not origin_ok(request):
+        return JSONResponse({"ok": False, "error": "origin not allowed"}, 403)
+    if rate_limited(request):
+        return JSONResponse({"ok": False, "error": "Too many tries. Wait a few minutes."}, 429)
+    body = await read_json(request)
+    data, err = validate_signup(
+        body.get("name", ""), body.get("email", ""),
+        body.get("password", ""),
+        body.get("password_confirm", body.get("confirm", "")),
+    )
+    if err:
+        return JSONResponse({"ok": False, "error": err}, 400)
+    try:
+        uid = create_user(data["email"], data["password"], data["name"])
+    except sqlite3.IntegrityError:
+        return JSONResponse(
+            {"ok": False, "error": "That email already has an account. Sign in."}, 409)
+    request.session["uid"] = uid
+    c = conn()
+    row = c.execute("SELECT * FROM users WHERE id=?", (uid,)).fetchone()
+    c.close()
+    return {"ok": True, "user": user_public(row)}
+
+
+@app.post("/v1/auth/login")
+async def api_login(request: Request):
+    if not origin_ok(request):
+        return JSONResponse({"ok": False, "error": "origin not allowed"}, 403)
+    if rate_limited(request):
+        return JSONResponse({"ok": False, "error": "Too many tries. Wait a few minutes."}, 429)
+    body = await read_json(request)
+    email = normalize_email(body.get("email", ""))
+    password = body.get("password") or ""
+    c = conn()
+    row = c.execute("SELECT * FROM users WHERE email=?", (email,)).fetchone()
+    c.close()
+    if not row or not _verify(row["password_hash"], password):
+        return JSONResponse({"ok": False, "error": LOGIN_ERROR}, 401)
+    request.session["uid"] = row["id"]
+    return {"ok": True, "user": user_public(row)}
+
+
+@app.post("/v1/auth/logout")
+def api_logout(request: Request):
+    request.session.clear()
+    return {"ok": True}
+
+
+@app.get("/v1/auth/me")
+def api_me(request: Request):
+    user = current_user(request)
+    if not user:
+        return JSONResponse({"ok": False, "error": "not signed in"}, 401)
+    return {"ok": True, "user": user_public(user)}
 
 
 @app.get("/brands/new", response_class=HTMLResponse)
@@ -575,12 +811,12 @@ def _startup():
         pass
 
 
-def create_user(email: str, password: str) -> str:
+def create_user(email: str, password: str, name: str = "") -> str:
     c = conn()
     uid = db.new_id()
     c.execute(
-        "INSERT INTO users (id, email, password_hash, created_at) VALUES (?,?,?,?)",
-        (uid, email.strip().lower(), hash_password(password), db.now()),
+        "INSERT INTO users (id, email, password_hash, name, created_at) VALUES (?,?,?,?,?)",
+        (uid, email.strip().lower(), hash_password(password), (name or "").strip(), db.now()),
     )
     c.commit()
     c.close()
