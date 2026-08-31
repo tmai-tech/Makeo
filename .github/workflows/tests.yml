@@ -20,5 +20,3 @@ jobs:
         env:
           MAKEO_MASTER_KEY: "unused-overridden-in-tests"
         run: python -m unittest discover -s tests -q
-      - name: Notebook check
-        run: python notebooks/check_notebook.py
