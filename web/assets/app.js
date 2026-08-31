@@ -1035,6 +1035,10 @@
 
   function cleanWorkerUrl(raw) {
     var u = String(raw || "").replace(/[\u200b\u200c\u200d\ufeff]/g, "").trim();
+    var colab = u.match(/https:\/\/[a-z0-9.-]+\.colab\.dev/i);
+    if (colab) return colab[0].replace(/\/+$/, "");
+    var guc = u.match(/https:\/\/[a-z0-9.-]+\.googleusercontent\.com/i);
+    if (guc) return guc[0].replace(/\/+$/, "");
     var cf = u.match(/https:\/\/[a-z0-9-]+\.trycloudflare\.com/i);
     if (cf) return cf[0];
     u = u.replace(/^[`'<\[]+|[>`'\]]+$/g, "");
@@ -1051,29 +1055,30 @@
   function workerUrlError(raw) {
     var u = cleanWorkerUrl(raw);
     if (!u) {
-      return "Paste the URL Colab printed after Start worker — googleusercontent.com, or a trycloudflare URL that actually loads.";
+      return "Paste the worker URL that loads JSON in a tab — usually https://….colab.dev";
     }
     var low = u.toLowerCase();
     if (low.indexOf("colab.research.google.com") >= 0 || low.indexOf("colab.google.com") >= 0) {
-      return "That is the Colab notebook tab, not the worker. Copy the googleusercontent.com (or working tunnel) URL the last cell printed.";
+      return "That is the Colab notebook tab, not the worker. Copy the https://….colab.dev line.";
     }
     if (low.indexOf("github.com") >= 0 || low.indexOf("githubusercontent.com") >= 0) {
-      return "That is a GitHub link. You need the trycloudflare.com URL printed by the Colab worker cell.";
+      return "That is a GitHub link. Paste the https://….colab.dev worker URL.";
     }
     var okHost = (
+      low.indexOf("colab.dev") >= 0 ||
+      low.indexOf("googleusercontent.com") >= 0 ||
       low.indexOf("trycloudflare.com") >= 0 ||
       low.indexOf("ngrok") >= 0 ||
       low.indexOf("loca.lt") >= 0 ||
-      low.indexOf("googleusercontent.com") >= 0 ||
       low.indexOf("gradio.live") >= 0 ||
       low.indexOf("localhost.run") >= 0 ||
       low.indexOf("lhr.life") >= 0
     );
     if (!okHost) {
-      return "This does not look like a tunnel URL. It must be https://….trycloudflare.com from the Colab worker cell output.";
+      return "This does not look like a worker URL. Paste the https://….colab.dev link that shows {\"ok\":true}.";
     }
     if (low.indexOf("http://") === 0) {
-      return "Use the https:// trycloudflare URL. This site cannot call a plain http worker.";
+      return "Use the https:// worker URL. This site cannot call a plain http worker.";
     }
     return "";
   }
@@ -1095,12 +1100,12 @@
       '<section class="panel">' +
       '<label>Colab worker URL</label>' +
       '<div class="row worker-row">' +
-      '<input id="workerUrl" placeholder="https://….trycloudflare.com" value="' + esc(b.catalogWorkerUrl || "") + '"/>' +
+      '<input id="workerUrl" placeholder="https://….colab.dev" value="' + esc(b.catalogWorkerUrl || "") + '"/>' +
       '<button type="button" class="btn ghost" id="saveWorker">Save</button>' +
-      '<a class="btn ghost" id="openWorker" target="makeo-worker-ui" rel="noopener" href="#">Open worker tab</a>' +
+      '<a class="btn ghost" id="openWorker" target="makeo-colab-worker" rel="noopener" href="#">Open worker tab</a>' +
       '<button type="button" class="btn ghost" id="startColab">Start Colab</button>' +
       "</div>" +
-      '<p class="muted">Paste the URL Colab labeled <strong>PASTE THIS</strong>. Prefer <code>googleusercontent.com</code> if trycloudflare never loads. Save, allow the worker tab, then Create look.</p>' +
+      '<p class="muted">Paste the <code>https://….colab.dev</code> URL that shows <code>{"ok":true}</code>. Do not use a trycloudflare link if that tab shows Cloudflare error 1033. Save, then Create look.</p>' +
       '<div class="cat-grid">' +
       '<div><label>Model</label><div class="drop" id="dropPerson"><span class="hint">Indian model · full body or 3/4</span>' +
       '<input type="file" id="filePerson" accept="image/*"/></div></div>' +
@@ -1188,7 +1193,7 @@
         reject(new Error("Worker URL is not valid."));
         return;
       }
-      var w = window.open(base + "/ui", "makeo-worker-ui");
+      var w = window.open(base + "/ui", "makeo-colab-worker");
       if (!w) {
         reject(new Error("The worker tab was blocked. Allow pop-ups for this site, click Open worker tab, then Create look again."));
         return;
@@ -1287,9 +1292,12 @@
         b = rec;
         syncOpen();
         pingWorker(workerUrlOf(b), pill);
-        try { window.open(typed + "/ui", "makeo-worker-ui"); } catch (e) {}
+        try { window.open(typed + "/ui", "makeo-colab-worker"); } catch (e) {}
         if (status) {
-          status.innerHTML = '<span class="ok">Saved. In the worker tab, click through Cloudflare until you see <strong>Waiting for Makeo</strong>, then Create look here.</span>';
+          var hint = typed.toLowerCase().indexOf("trycloudflare.com") >= 0
+            ? '<span class="error">Saved, but trycloudflare often shows error 1033. Paste the <code>colab.dev</code> URL that already loads JSON, then Save again.</span>'
+            : '<span class="ok">Saved. The worker tab should say <strong>Waiting for Makeo</strong> (or JSON). Close any Cloudflare 1033 tab. Then Create look.</span>';
+          status.innerHTML = hint;
         }
       });
     }
